@@ -17,19 +17,19 @@ namespace EcommerceTxPr.Infrastructure.Repositories
 
         public async Task<Result<string, Error>> CreateAsync(Customer obj)
         {
-            await _context.Customers.AddAsync(obj);
+            await _context.Customers.AddAsync(obj).ConfigureAwait(false);
 
             return "client created";
         }
 
         public async Task<Result<string, Error>> DeleteByIdAsync(int Id)
         {
-            var customer = await GetByIdAsync(Id);
+            var customer = await GetByIdAsync(Id).ConfigureAwait(false);
 
             if (customer.IsSuccess == false)
                 return GenericErrors.NotFoundObject;
 
-            customer.Value!.UpdateStatus();
+            customer.Value!.TurnIsActiveToFalse(); 
 
             await UpdateAsync(customer.Value!);
 

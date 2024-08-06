@@ -19,9 +19,9 @@ namespace EcommerceApi.Entities
             IsActive = true;
         }
 
-        public void UpdateStatus()
+        public void TurnIsActiveToFalse()
         {
-            IsActive = !IsActive;
+            IsActive = false;
         }
 
         public void ChangeId(Guid guid)
