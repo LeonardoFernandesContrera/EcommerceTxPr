@@ -1,5 +1,5 @@
-﻿using EcommerceApi.Entities;
-using EcommerceTxPr.Aplication.Services;
+using EcommerceTxPr.Application.Services;
+using EcommerceTxPr.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EcommerceApi.V2.Controllers
@@ -12,9 +12,9 @@ namespace EcommerceApi.V2.Controllers
 
         [HttpGet]
         [Route("GetById")]
-        public async Task<object> GetById(int Id)
+        public async Task<object> GetById(Guid id)
         {
-            return await _customerService.GetByIdAsync(Id).ConfigureAwait(false);
+            return await _customerService.GetByIdAsync(id).ConfigureAwait(false);
         }
 
         [HttpGet]
@@ -40,9 +40,9 @@ namespace EcommerceApi.V2.Controllers
 
         [HttpDelete]
         [Route("Delete")]
-        public async Task<object> Delete(int Id)
+        public async Task<object> Delete(Guid id)
         {
-            return await _customerService.DeleteByIdAsync(Id).ConfigureAwait(false);
+            return await _customerService.DeleteByIdAsync(id).ConfigureAwait(false);
         }
     }
 }

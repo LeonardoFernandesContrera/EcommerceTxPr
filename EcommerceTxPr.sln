@@ -11,7 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "EcommerceTxPr.Domain", "Eco
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "EcommerceTxPr.Infrastructure", "EcommerceTxPr.Infrastructure\EcommerceTxPr.Infrastructure.csproj", "{C89308D1-FD52-49A3-B044-DDB48C3478F6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EcommerceTxPr.Aplication", "EcommerceTxPr.Aplication\EcommerceTxPr.Aplication.csproj", "{FBC10B7B-F27E-4262-A323-6192A4AC73D1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EcommerceTxPr.Application", "EcommerceTxPr.Application\EcommerceTxPr.Application.csproj", "{FBC10B7B-F27E-4262-A323-6192A4AC73D1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

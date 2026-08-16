@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace EcommerceApi.Entities
+namespace EcommerceTxPr.Domain.Entities
 {
     public class BaseEntity
     {
@@ -15,18 +15,13 @@ namespace EcommerceApi.Entities
         protected BaseEntity() 
         {
             Id = Guid.NewGuid();
-            CreationDate = DateTime.Now;
+            CreationDate = DateTime.UtcNow;
             IsActive = true;
         }
 
         public void TurnIsActiveToFalse()
         {
             IsActive = false;
-        }
-
-        public void ChangeId(Guid guid)
-        {
-            Id = guid;
         }
     }
 }

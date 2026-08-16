@@ -1,9 +1,8 @@
-﻿using EcommerceApi.Entities;
+using EcommerceTxPr.Domain.Entities;
 
-namespace EcommerceTxPr.Infrastructure.Repositories
+namespace EcommerceTxPr.Application.Repositories
 {
     public interface ICustomerRepository : IBaseRepository<Customer>
     {
-
     }
 }

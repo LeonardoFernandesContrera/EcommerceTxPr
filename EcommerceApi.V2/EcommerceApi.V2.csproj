@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EcommerceTxPr.Aplication\EcommerceTxPr.Aplication.csproj" />
+    <ProjectReference Include="..\EcommerceTxPr.Application\EcommerceTxPr.Application.csproj" />
     <ProjectReference Include="..\EcommerceTxPr.Infrastructure\EcommerceTxPr.Infrastructure.csproj" />
   </ItemGroup>
 

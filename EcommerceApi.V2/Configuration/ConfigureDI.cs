@@ -1,5 +1,4 @@
-﻿using EcommerceTxPr.Aplication.Services;
-using EcommerceTxPr.Infrastructure.Repositories;
+using EcommerceTxPr.Application.Services;
 
 namespace EcommerceApi.V2.Configuration
 {
@@ -9,11 +8,6 @@ namespace EcommerceApi.V2.Configuration
         {
             // Services
             services.AddScoped<ICustomerService, CustomerService>();
-
-
-            // Repositories
-            services.AddScoped<ICustomerRepository, CustomerRepository>();
-
             return services;
         }
 

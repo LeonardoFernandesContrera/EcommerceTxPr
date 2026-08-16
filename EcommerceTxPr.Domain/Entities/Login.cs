@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
-namespace EcommerceApi.Entities
+namespace EcommerceTxPr.Domain.Entities
 {
     public class Login : BaseEntity
     {

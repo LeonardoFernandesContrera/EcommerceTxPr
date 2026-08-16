@@ -1,14 +1,19 @@
-using EcommerceApi.Middlewares;
 using EcommerceApi.V2.Configuration;
-using EcommerceTxPr.Infrastructure.Context;
-using EcommerceTxPr.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
+using EcommerceApi.V2.Middlewares;
+using EcommerceTxPr.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddDbContext<EcommerceTxPrDbContext>(options => options.UseSqlServer(DatabaseInfo.SqlServerConnection));
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
+}
+
+builder.Services.AddInfrastructure(connectionString);
 
 builder.Services.ConfigureDIExtension();
 

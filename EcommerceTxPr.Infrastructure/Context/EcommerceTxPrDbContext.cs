@@ -1,4 +1,4 @@
-﻿using EcommerceApi.Entities;
+using EcommerceTxPr.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceTxPr.Infrastructure.Context

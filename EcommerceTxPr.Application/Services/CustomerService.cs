@@ -1,8 +1,8 @@
-﻿using EcommerceApi.Entities;
+using EcommerceTxPr.Application.Repositories;
+using EcommerceTxPr.Domain.Entities;
 using EcommerceTxPr.Domain.Shared;
-using EcommerceTxPr.Infrastructure.Repositories;
 
-namespace EcommerceTxPr.Aplication.Services
+namespace EcommerceTxPr.Application.Services
 {
     public class CustomerService : ICustomerService
     {
@@ -18,25 +18,24 @@ namespace EcommerceTxPr.Aplication.Services
             return _customerRepository.GetAllAsync();
         }
 
-        public Task<Result<Customer, Error>> GetByIdAsync(int Id)
+        public Task<Result<Customer, Error>> GetByIdAsync(Guid id)
         {
-            return _customerRepository.GetByIdAsync(Id);
+            return _customerRepository.GetByIdAsync(id);
         }
 
-        public  Task<Result<string, Error>> CreateAsync(Customer obj)
+        public Task<Result<string, Error>> CreateAsync(Customer obj)
         {
             return _customerRepository.CreateAsync(obj);
         }
 
-        public  Task<Result<string, Error>> UpdateAsync(Customer obj)
+        public Task<Result<string, Error>> UpdateAsync(Customer obj)
         {
             return _customerRepository.UpdateAsync(obj);
         }
 
-        public  Task<Result<string, Error>> DeleteByIdAsync(int Id)
+        public Task<Result<string, Error>> DeleteByIdAsync(Guid id)
         {
-            return _customerRepository.DeleteByIdAsync(Id);
+            return _customerRepository.DeleteByIdAsync(id);
         }
-
     }
 }
