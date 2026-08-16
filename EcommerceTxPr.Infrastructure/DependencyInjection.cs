@@ -1,4 +1,4 @@
-using EcommerceTxPr.Application.Repositories;
+using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;

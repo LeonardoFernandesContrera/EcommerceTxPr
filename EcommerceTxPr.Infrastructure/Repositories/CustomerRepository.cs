@@ -1,13 +1,11 @@
-using EcommerceTxPr.Application.Repositories;
+using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Domain.Entities;
-using EcommerceTxPr.Domain.Shared;
 using EcommerceTxPr.Infrastructure.Context;
-using EcommerceTxPr.Infrastructure.ResultPatterns;
 using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceTxPr.Infrastructure.Repositories
 {
-    public class CustomerRepository : ICustomerRepository
+    public sealed class CustomerRepository : ICustomerRepository
     {
         private readonly EcommerceTxPrDbContext _context;
 
@@ -16,54 +14,49 @@ namespace EcommerceTxPr.Infrastructure.Repositories
             _context = context;
         }
 
-        public async Task<Result<string, Error>> CreateAsync(Customer obj)
-        {
-            await _context.Customers.AddAsync(obj).ConfigureAwait(false);
-            await _context.SaveChangesAsync().ConfigureAwait(false);
-
-            return "client created";
-        }
-
-        public async Task<Result<string, Error>> DeleteByIdAsync(Guid id)
-        {
-            var customer = await GetByIdAsync(id).ConfigureAwait(false);
-
-            if (customer.IsSuccess == false)
-                return GenericErrors.NotFoundObject;
-
-            customer.Value!.TurnIsActiveToFalse();
-
-            await UpdateAsync(customer.Value!).ConfigureAwait(false);
-
-            return "Client was updated";
-        }
-
-        public async Task<Result<IEnumerable<Customer>, Error>> GetAllAsync()
+        public async Task<IReadOnlyCollection<Customer>> GetAllAsync(
+            CancellationToken cancellationToken)
         {
             return await _context.Customers
+                .AsNoTracking()
                 .Where(customer => customer.IsActive)
-                .ToListAsync()
+                .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        public async Task<Result<Customer, Error>> GetByIdAsync(Guid id)
+        public async Task<Customer?> GetByIdAsync(
+            Guid id,
+            CancellationToken cancellationToken)
         {
-            var customer = await _context.Customers
-                .FirstOrDefaultAsync(customer => customer.Id == id && customer.IsActive)
+            return await _context.Customers
+                .FirstOrDefaultAsync(
+                    customer => customer.Id == id && customer.IsActive,
+                    cancellationToken)
                 .ConfigureAwait(false);
-
-            if (customer == null)
-                return GenericErrors.NotFoundObject;
-
-            return customer;
         }
 
-        public async Task<Result<string, Error>> UpdateAsync(Customer obj)
+        public async Task AddAsync(
+            Customer customer,
+            CancellationToken cancellationToken)
         {
-            _context.Set<Customer>().Entry(obj).State = EntityState.Modified;
-            await _context.SaveChangesAsync().ConfigureAwait(false);
+            await _context.Customers
+                .AddAsync(customer, cancellationToken)
+                .ConfigureAwait(false);
 
-            return "Modified with success";
+            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task UpdateAsync(
+            Customer customer,
+            CancellationToken cancellationToken)
+        {
+            if (_context.Entry(customer).State == EntityState.Detached)
+            {
+                throw new InvalidOperationException(
+                    "A customer must be loaded by this repository before it can be updated.");
+            }
+
+            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 }

@@ -19,7 +19,7 @@ namespace EcommerceTxPr.Domain.Entities
             IsActive = true;
         }
 
-        public void TurnIsActiveToFalse()
+        public void Deactivate()
         {
             IsActive = false;
         }

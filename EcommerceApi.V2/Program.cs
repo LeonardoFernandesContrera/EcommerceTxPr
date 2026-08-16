@@ -1,5 +1,5 @@
-using EcommerceApi.V2.Configuration;
 using EcommerceApi.V2.Middlewares;
+using EcommerceTxPr.Application;
 using EcommerceTxPr.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,9 +13,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 }
 
+builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
-
-builder.Services.ConfigureDIExtension();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle

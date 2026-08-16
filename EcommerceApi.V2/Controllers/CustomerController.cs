@@ -1,5 +1,5 @@
-using EcommerceTxPr.Application.Services;
-using EcommerceTxPr.Domain.Entities;
+using EcommerceTxPr.Application.Customers.Contracts;
+using EcommerceTxPr.Application.Customers.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EcommerceApi.V2.Controllers
@@ -12,37 +12,56 @@ namespace EcommerceApi.V2.Controllers
 
         [HttpGet]
         [Route("GetById")]
-        public async Task<object> GetById(Guid id)
+        public async Task<object> GetById(
+            [FromQuery] Guid id,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.GetByIdAsync(id).ConfigureAwait(false);
+            return await _customerService
+                .GetByIdAsync(id, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         [HttpGet]
         [Route("GetAll")]
-        public async Task<object> GetAll()
+        public async Task<object> GetAll(CancellationToken cancellationToken)
         {
-            return await _customerService.GetAllAsync().ConfigureAwait(false);
+            return await _customerService
+                .GetAllAsync(cancellationToken)
+                .ConfigureAwait(false);
         }
 
         [HttpPost]
         [Route("Create")]
-        public async Task<object> Create(Customer customer)
+        public async Task<object> Create(
+            [FromBody] CreateCustomerRequest request,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.CreateAsync(customer).ConfigureAwait(false);
+            return await _customerService
+                .CreateAsync(request, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         [HttpPut]
         [Route("Update")]
-        public async Task<object> Update(Customer customer)
+        public async Task<object> Update(
+            [FromQuery] Guid id,
+            [FromBody] UpdateCustomerRequest request,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.UpdateAsync(customer).ConfigureAwait(false);
+            return await _customerService
+                .UpdateAsync(id, request, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         [HttpDelete]
         [Route("Delete")]
-        public async Task<object> Delete(Guid id)
+        public async Task<object> Delete(
+            [FromQuery] Guid id,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.DeleteByIdAsync(id).ConfigureAwait(false);
+            return await _customerService
+                .DeleteAsync(id, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 }
