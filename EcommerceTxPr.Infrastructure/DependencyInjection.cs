@@ -1,4 +1,6 @@
 using EcommerceTxPr.Application.Customers.Repositories;
+using EcommerceTxPr.Application.Orders.Repositories;
+using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,8 @@ namespace EcommerceTxPr.Infrastructure
             services.AddDbContext<EcommerceTxPrDbContext>(
                 options => options.UseSqlServer(connectionString));
             services.AddScoped<ICustomerRepository, CustomerRepository>();
+            services.AddScoped<IProductRepository, ProductRepository>();
+            services.AddScoped<IOrderRepository, OrderRepository>();
 
             return services;
         }

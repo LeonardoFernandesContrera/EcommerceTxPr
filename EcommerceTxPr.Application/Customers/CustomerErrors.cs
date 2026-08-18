@@ -6,6 +6,7 @@ namespace EcommerceTxPr.Application.Customers
     {
         public static readonly Error NotFound = new(
             "Customer.NotFound",
-            "The customer was not found.");
+            "The customer was not found.",
+            ErrorType.NotFound);
     }
 }

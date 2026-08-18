@@ -1,27 +1,15 @@
-﻿using System.ComponentModel.DataAnnotations;
-
 namespace EcommerceTxPr.Domain.Entities
 {
-    public class BaseEntity
+    public abstract class BaseEntity
     {
-        [Key]
         public Guid Id { get; private set; }
-        [Required]
+
         public DateTime CreationDate { get; private set; }
 
-        [Required]
-        public bool IsActive { get; private set; }
-
-        protected BaseEntity() 
+        protected BaseEntity()
         {
             Id = Guid.NewGuid();
             CreationDate = DateTime.UtcNow;
-            IsActive = true;
-        }
-
-        public void Deactivate()
-        {
-            IsActive = false;
         }
     }
 }

@@ -1,5 +1,4 @@
 using EcommerceTxPr.Application.Common;
-using EcommerceTxPr.Application.Customers;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EcommerceApi.V2.ErrorHandling
@@ -10,27 +9,34 @@ namespace EcommerceApi.V2.ErrorHandling
             this ControllerBase controller,
             Error error)
         {
-            if (error.Code == CustomerErrors.NotFound.Code)
+            var (statusCode, title) = error.Type switch
             {
-                var result = controller.Problem(
-                    detail: error.Message,
-                    instance: controller.HttpContext.Request.Path,
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Customer not found");
+                ErrorType.Validation => (
+                    StatusCodes.Status400BadRequest,
+                    "Validation error"),
+                ErrorType.NotFound => (
+                    StatusCodes.Status404NotFound,
+                    "Resource not found"),
+                ErrorType.Conflict => (
+                    StatusCodes.Status409Conflict,
+                    "Conflict"),
+                _ => (
+                    StatusCodes.Status500InternalServerError,
+                    "Internal Server Error")
+            };
 
-                if (result.Value is ProblemDetails problemDetails)
-                {
-                    problemDetails.Extensions["code"] = error.Code;
-                }
+            var result = controller.Problem(
+                detail: error.Message,
+                instance: controller.HttpContext.Request.Path,
+                statusCode: statusCode,
+                title: title);
 
-                return result;
+            if (result.Value is ProblemDetails problemDetails)
+            {
+                problemDetails.Extensions["code"] = error.Code;
             }
 
-            return controller.Problem(
-                detail: "An unexpected error occurred while processing the request.",
-                instance: controller.HttpContext.Request.Path,
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error");
+            return result;
         }
     }
 }
