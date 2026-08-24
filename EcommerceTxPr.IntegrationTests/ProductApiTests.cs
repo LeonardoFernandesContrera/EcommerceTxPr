@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using EcommerceTxPr.Application.Products.Contracts;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
 
@@ -24,6 +25,10 @@ public sealed class ProductApiTests
         Assert.Equal(request.Name, created.Name);
         Assert.Equal(request.Price, created.Price);
         Assert.Equal(request.StockQuantity, created.StockQuantity);
+
+        var responseJson = await postResponse.Content.ReadAsStringAsync();
+        using var responseDocument = JsonDocument.Parse(responseJson);
+        Assert.False(responseDocument.RootElement.TryGetProperty("version", out _));
 
         var location = postResponse.Headers.Location;
         Assert.NotNull(location);
@@ -73,6 +78,7 @@ public sealed class ProductApiTests
         Assert.Equal(created.Sku, updated.Sku);
         Assert.Equal("Updated Product", updated.Name);
         Assert.Equal(150m, updated.Price);
+        Assert.Equal(created.StockQuantity, updated.StockQuantity);
     }
 
     [Fact]

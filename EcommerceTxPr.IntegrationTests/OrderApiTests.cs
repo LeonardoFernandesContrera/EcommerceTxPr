@@ -3,7 +3,10 @@ using System.Net.Http.Json;
 using EcommerceTxPr.Application.Orders.Contracts;
 using EcommerceTxPr.Application.Products.Contracts;
 using EcommerceTxPr.Domain.Enums;
+using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace EcommerceTxPr.IntegrationTests;
 
@@ -80,6 +83,24 @@ public sealed class OrderApiTests
             response,
             HttpStatusCode.NotFound,
             "Customer.NotFound");
+    }
+
+    [Fact]
+    public async Task Post_with_empty_customer_id_returns_validation_problem_details()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var product = await ApiTestData.CreateProductAsync(client);
+        var request = new CreateOrderRequest(
+            Guid.Empty,
+            new[] { new CreateOrderItemRequest(product.Id, 1) });
+
+        using var response = await client.PostAsJsonAsync("/api/orders", request);
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.BadRequest,
+            "Order.InvalidCustomer");
     }
 
     [Fact]
@@ -199,6 +220,104 @@ public sealed class OrderApiTests
         Assert.Equal(200m, historicalOrder.Total);
     }
 
+    [Fact]
+    public async Task Post_decrements_inventory_exposed_by_product_api()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 5);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        using var response = await client.PostAsJsonAsync("/api/orders", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var productResponse = await client.GetAsync($"/api/products/{product.Id}");
+        Assert.Equal(HttpStatusCode.OK, productResponse.StatusCode);
+        var updatedProduct = await productResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        Assert.NotNull(updatedProduct);
+        Assert.Equal(3, updatedProduct.StockQuantity);
+    }
+
+    [Fact]
+    public async Task Post_with_insufficient_stock_returns_conflict_without_changes()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 1);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        using var response = await client.PostAsJsonAsync("/api/orders", request);
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.Conflict,
+            "Product.InsufficientStock");
+        using var productResponse = await client.GetAsync($"/api/products/{product.Id}");
+        var unchangedProduct = await productResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        Assert.NotNull(unchangedProduct);
+        Assert.Equal(1, unchangedProduct.StockQuantity);
+        await AssertOrderCountAsync(factory, 0);
+    }
+
+    [Fact]
+    public async Task Post_with_one_unavailable_product_is_atomic()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var availableProduct = await ApiTestData.CreateProductAsync(
+            client,
+            "SKU-AVAILABLE",
+            "Available",
+            10m,
+            5);
+        var unavailableProduct = await ApiTestData.CreateProductAsync(
+            client,
+            "SKU-UNAVAILABLE",
+            "Unavailable",
+            10m,
+            0);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[]
+            {
+                new CreateOrderItemRequest(availableProduct.Id, 2),
+                new CreateOrderItemRequest(unavailableProduct.Id, 1)
+            });
+
+        using var response = await client.PostAsJsonAsync("/api/orders", request);
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.Conflict,
+            "Product.InsufficientStock");
+        using var availableResponse = await client.GetAsync(
+            $"/api/products/{availableProduct.Id}");
+        using var unavailableResponse = await client.GetAsync(
+            $"/api/products/{unavailableProduct.Id}");
+        var returnedAvailable = await availableResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        var returnedUnavailable = await unavailableResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        Assert.NotNull(returnedAvailable);
+        Assert.NotNull(returnedUnavailable);
+        Assert.Equal(5, returnedAvailable.StockQuantity);
+        Assert.Equal(0, returnedUnavailable.StockQuantity);
+        await AssertOrderCountAsync(factory, 0);
+    }
+
     private static void AssertItem(
         OrderItemResponse item,
         ProductResponse product,
@@ -210,5 +329,15 @@ public sealed class OrderApiTests
         Assert.Equal(product.Price, item.UnitPrice);
         Assert.Equal(expectedQuantity, item.Quantity);
         Assert.Equal(expectedLineTotal, item.LineTotal);
+    }
+
+    private static async Task AssertOrderCountAsync(
+        CustomerApiFactory factory,
+        int expectedCount)
+    {
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        Assert.Equal(expectedCount, await context.Orders.CountAsync());
     }
 }
