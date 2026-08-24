@@ -14,15 +14,18 @@ public sealed class OrderService : IOrderService
     private readonly ICustomerRepository _customerRepository;
     private readonly IProductRepository _productRepository;
     private readonly IOrderRepository _orderRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public OrderService(
         ICustomerRepository customerRepository,
         IProductRepository productRepository,
-        IOrderRepository orderRepository)
+        IOrderRepository orderRepository,
+        IUnitOfWork unitOfWork)
     {
         _customerRepository = customerRepository;
         _productRepository = productRepository;
         _orderRepository = orderRepository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<Result<OrderResponse, Error>> GetByIdAsync(
@@ -42,6 +45,12 @@ public sealed class OrderService : IOrderService
         CreateOrderRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.CustomerId == Guid.Empty)
+        {
+            return Result<OrderResponse, Error>.Failure(
+                OrderErrors.InvalidCustomer);
+        }
+
         if (request.Items is null || request.Items.Count == 0)
         {
             return Result<OrderResponse, Error>.Failure(OrderErrors.Empty);
@@ -66,10 +75,26 @@ public sealed class OrderService : IOrderService
             return Result<OrderResponse, Error>.Failure(CustomerErrors.NotFound);
         }
 
-        var productIds = request.Items
-            .Select(item => item.ProductId)
-            .Distinct()
-            .ToArray();
+        var requestedQuantities = new Dictionary<Guid, int>();
+
+        try
+        {
+            foreach (var item in request.Items)
+            {
+                requestedQuantities[item.ProductId] = requestedQuantities.TryGetValue(
+                    item.ProductId,
+                    out var currentQuantity)
+                    ? checked(currentQuantity + item.Quantity)
+                    : item.Quantity;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Result<OrderResponse, Error>.Failure(
+                OrderErrors.InvalidQuantity);
+        }
+
+        var productIds = requestedQuantities.Keys.ToArray();
 
         var products = await _productRepository
             .GetByIdsAsync(productIds, cancellationToken)
@@ -82,16 +107,24 @@ public sealed class OrderService : IOrderService
             return Result<OrderResponse, Error>.Failure(ProductErrors.NotFound);
         }
 
+        if (requestedQuantities.Any(requested =>
+                productsById[requested.Key].StockQuantity < requested.Value))
+        {
+            return Result<OrderResponse, Error>.Failure(
+                ProductErrors.InsufficientStock);
+        }
+
         var order = new Order(customer.Id);
 
-        foreach (var requestedItem in request.Items)
+        foreach (var requestedItem in requestedQuantities)
         {
-            var product = productsById[requestedItem.ProductId];
+            var product = productsById[requestedItem.Key];
             order.AddItem(
                 product.Id,
                 product.Name,
                 product.Price,
-                requestedItem.Quantity);
+                requestedItem.Value);
+            product.DecreaseStock(requestedItem.Value);
         }
 
         order.Place();
@@ -99,6 +132,16 @@ public sealed class OrderService : IOrderService
         await _orderRepository
             .AddAsync(order, cancellationToken)
             .ConfigureAwait(false);
+
+        var saveResult = await _unitOfWork
+            .SaveChangesAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return Result<OrderResponse, Error>.Failure(
+                OrderErrors.InventoryChanged);
+        }
 
         return Result<OrderResponse, Error>.Success(ToResponse(order));
     }

@@ -20,6 +20,4 @@ public interface IProductRepository
         CancellationToken cancellationToken);
 
     Task AddAsync(Product product, CancellationToken cancellationToken);
-
-    Task UpdateAsync(Product product, CancellationToken cancellationToken);
 }

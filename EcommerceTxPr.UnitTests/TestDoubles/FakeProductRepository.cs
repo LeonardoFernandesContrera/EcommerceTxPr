@@ -19,8 +19,6 @@ internal sealed class FakeProductRepository : IProductRepository
 
     public List<Product> AddedProducts { get; } = new();
 
-    public List<Product> UpdatedProducts { get; } = new();
-
     public Task<IReadOnlyCollection<Product>> GetAllAsync(
         CancellationToken cancellationToken)
     {
@@ -55,9 +53,4 @@ internal sealed class FakeProductRepository : IProductRepository
         return Task.CompletedTask;
     }
 
-    public Task UpdateAsync(Product product, CancellationToken cancellationToken)
-    {
-        UpdatedProducts.Add(product);
-        return Task.CompletedTask;
-    }
 }

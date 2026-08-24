@@ -42,21 +42,6 @@ namespace EcommerceTxPr.Infrastructure.Repositories
             await _context.Customers
                 .AddAsync(customer, cancellationToken)
                 .ConfigureAwait(false);
-
-            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task UpdateAsync(
-            Customer customer,
-            CancellationToken cancellationToken)
-        {
-            if (_context.Entry(customer).State == EntityState.Detached)
-            {
-                throw new InvalidOperationException(
-                    "A customer must be loaded by this repository before it can be updated.");
-            }
-
-            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 }

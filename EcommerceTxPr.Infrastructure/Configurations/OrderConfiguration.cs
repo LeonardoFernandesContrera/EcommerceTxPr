@@ -15,6 +15,11 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.HasIndex(order => order.CustomerId);
 
+        builder.HasOne<Customer>()
+            .WithMany()
+            .HasForeignKey(order => order.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(order => order.Status)
             .HasConversion<string>()
             .HasMaxLength(20)

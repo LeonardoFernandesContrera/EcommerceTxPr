@@ -8,15 +8,24 @@ public sealed class Product : BaseEntity
         Name = string.Empty;
     }
 
-    public Product(string sku, string name, decimal price)
+    public Product(string sku, string name, decimal price, int stockQuantity)
     {
         EnsureNotBlank(sku, nameof(sku));
         EnsureValidDetails(name, price);
 
+        if (stockQuantity < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(stockQuantity),
+                "Initial stock quantity cannot be negative.");
+        }
+
         Sku = sku;
         Name = name;
         Price = price;
+        StockQuantity = stockQuantity;
         IsActive = true;
+        Version = Guid.NewGuid();
     }
 
     public string Sku { get; private set; }
@@ -25,7 +34,11 @@ public sealed class Product : BaseEntity
 
     public decimal Price { get; private set; }
 
+    public int StockQuantity { get; private set; }
+
     public bool IsActive { get; private set; }
+
+    public Guid Version { get; private set; }
 
     public void UpdateDetails(string name, decimal price)
     {
@@ -33,11 +46,35 @@ public sealed class Product : BaseEntity
 
         Name = name;
         Price = price;
+        RefreshVersion();
     }
 
     public void Deactivate()
     {
         IsActive = false;
+        RefreshVersion();
+    }
+
+    public void IncreaseStock(int quantity)
+    {
+        EnsurePositiveQuantity(quantity);
+
+        StockQuantity = checked(StockQuantity + quantity);
+        RefreshVersion();
+    }
+
+    public void DecreaseStock(int quantity)
+    {
+        EnsurePositiveQuantity(quantity);
+
+        if (quantity > StockQuantity)
+        {
+            throw new InvalidOperationException(
+                "The requested quantity exceeds the available stock.");
+        }
+
+        StockQuantity -= quantity;
+        RefreshVersion();
     }
 
     private static void EnsureValidDetails(string name, decimal price)
@@ -60,5 +97,20 @@ public sealed class Product : BaseEntity
                 "Value cannot be null or blank.",
                 parameterName);
         }
+    }
+
+    private static void EnsurePositiveQuantity(int quantity)
+    {
+        if (quantity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(quantity),
+                "Stock quantity must be greater than zero.");
+        }
+    }
+
+    private void RefreshVersion()
+    {
+        Version = Guid.NewGuid();
     }
 }

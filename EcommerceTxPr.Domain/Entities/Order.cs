@@ -45,6 +45,16 @@ public sealed class Order : BaseEntity
 
         if (existingItem is not null)
         {
+            if (!string.Equals(
+                    existingItem.ProductName,
+                    productName,
+                    StringComparison.Ordinal)
+                || existingItem.UnitPrice != unitPrice)
+            {
+                throw new InvalidOperationException(
+                    "Duplicate order items must use the same product snapshot.");
+            }
+
             existingItem.IncreaseQuantity(quantity);
             return;
         }

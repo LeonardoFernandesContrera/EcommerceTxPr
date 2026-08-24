@@ -5,4 +5,5 @@ public sealed record ProductResponse(
     string Sku,
     string Name,
     decimal Price,
+    int StockQuantity,
     DateTime CreationDate);

@@ -18,6 +18,13 @@ public sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         builder.Property(item => item.ProductId)
             .IsRequired();
 
+        builder.HasIndex(item => item.ProductId);
+
+        builder.HasOne<Product>()
+            .WithMany()
+            .HasForeignKey(item => item.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(item => item.ProductName)
             .HasMaxLength(100)
             .IsRequired();

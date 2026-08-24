@@ -17,7 +17,7 @@ public sealed class CustomerServiceTests
         {
             GetAllResult = new[] { first, second }
         };
-        var service = new CustomerService(repository);
+        var service = new CustomerService(repository, new FakeUnitOfWork());
 
         var result = await service.GetAllAsync(CancellationToken.None);
 
@@ -35,7 +35,7 @@ public sealed class CustomerServiceTests
     {
         var customer = new Customer("Existing Customer", new DateTime(1988, 6, 15));
         var repository = new FakeCustomerRepository { GetByIdResult = customer };
-        var service = new CustomerService(repository);
+        var service = new CustomerService(repository, new FakeUnitOfWork());
 
         var result = await service.GetByIdAsync(customer.Id, CancellationToken.None);
 
@@ -48,7 +48,9 @@ public sealed class CustomerServiceTests
     [Fact]
     public async Task GetByIdAsync_missing_customer_returns_not_found()
     {
-        var service = new CustomerService(new FakeCustomerRepository());
+        var service = new CustomerService(
+            new FakeCustomerRepository(),
+            new FakeUnitOfWork());
 
         var result = await service.GetByIdAsync(Guid.NewGuid(), CancellationToken.None);
 
@@ -61,7 +63,8 @@ public sealed class CustomerServiceTests
     public async Task CreateAsync_adds_customer_and_returns_created_response()
     {
         var repository = new FakeCustomerRepository();
-        var service = new CustomerService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new CustomerService(repository, unitOfWork);
         var request = new CreateCustomerRequest(
             "Created Customer",
             new DateTime(1995, 7, 20));
@@ -74,6 +77,7 @@ public sealed class CustomerServiceTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
         AssertMatches(addedCustomer, result.Value);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
@@ -83,7 +87,8 @@ public sealed class CustomerServiceTests
         var originalId = customer.Id;
         var originalCreationDate = customer.CreationDate;
         var repository = new FakeCustomerRepository { GetByIdResult = customer };
-        var service = new CustomerService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new CustomerService(repository, unitOfWork);
         var request = new UpdateCustomerRequest(
             "Updated Name",
             new DateTime(1983, 4, 5));
@@ -93,22 +98,22 @@ public sealed class CustomerServiceTests
             request,
             CancellationToken.None);
 
-        var updatedCustomer = Assert.Single(repository.UpdatedCustomers);
-        Assert.Same(customer, updatedCustomer);
-        Assert.Equal(request.Name, updatedCustomer.Name);
-        Assert.Equal(request.BirthDate, updatedCustomer.BirthDate);
-        Assert.Equal(originalId, updatedCustomer.Id);
-        Assert.Equal(originalCreationDate, updatedCustomer.CreationDate);
+        Assert.Equal(request.Name, customer.Name);
+        Assert.Equal(request.BirthDate, customer.BirthDate);
+        Assert.Equal(originalId, customer.Id);
+        Assert.Equal(originalCreationDate, customer.CreationDate);
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
-        AssertMatches(updatedCustomer, result.Value);
+        AssertMatches(customer, result.Value);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
     public async Task UpdateAsync_missing_customer_returns_not_found_without_updating()
     {
         var repository = new FakeCustomerRepository();
-        var service = new CustomerService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new CustomerService(repository, unitOfWork);
 
         var result = await service.UpdateAsync(
             Guid.NewGuid(),
@@ -117,7 +122,7 @@ public sealed class CustomerServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CustomerErrors.NotFound, result.Error);
-        Assert.Empty(repository.UpdatedCustomers);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
@@ -125,28 +130,29 @@ public sealed class CustomerServiceTests
     {
         var customer = new Customer("Customer To Delete", new DateTime(1975, 8, 9));
         var repository = new FakeCustomerRepository { GetByIdResult = customer };
-        var service = new CustomerService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new CustomerService(repository, unitOfWork);
 
         var result = await service.DeleteAsync(customer.Id, CancellationToken.None);
 
-        var updatedCustomer = Assert.Single(repository.UpdatedCustomers);
-        Assert.Same(customer, updatedCustomer);
         Assert.False(customer.IsActive);
         Assert.True(result.IsSuccess);
         Assert.Equal(customer.Id, result.Value);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
     public async Task DeleteAsync_missing_customer_returns_not_found_without_updating()
     {
         var repository = new FakeCustomerRepository();
-        var service = new CustomerService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new CustomerService(repository, unitOfWork);
 
         var result = await service.DeleteAsync(Guid.NewGuid(), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CustomerErrors.NotFound, result.Error);
-        Assert.Empty(repository.UpdatedCustomers);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
     }
 
     private static void AssertMatches(Customer customer, CustomerResponse response)

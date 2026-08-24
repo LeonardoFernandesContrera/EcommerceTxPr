@@ -27,11 +27,12 @@ internal static class ApiTestData
         HttpClient client,
         string sku = "SKU-001",
         string name = "Test Product",
-        decimal price = 100m)
+        decimal price = 100m,
+        int stockQuantity = 10)
     {
         using var response = await client.PostAsJsonAsync(
             "/api/products",
-            new CreateProductRequest(sku, name, price));
+            new CreateProductRequest(sku, name, price, stockQuantity));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var product = await response.Content.ReadFromJsonAsync<ProductResponse>();

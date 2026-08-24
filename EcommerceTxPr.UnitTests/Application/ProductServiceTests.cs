@@ -12,12 +12,12 @@ public sealed class ProductServiceTests
     [Fact]
     public async Task GetAllAsync_returns_mapped_product_responses()
     {
-        var product = new Product("SKU-001", "Product", 49.90m);
+        var product = new Product("SKU-001", "Product", 49.90m, 8);
         var repository = new FakeProductRepository
         {
             GetAllResult = new[] { product }
         };
-        var service = new ProductService(repository);
+        var service = new ProductService(repository, new FakeUnitOfWork());
 
         var result = await service.GetAllAsync(CancellationToken.None);
 
@@ -27,11 +27,12 @@ public sealed class ProductServiceTests
     }
 
     [Fact]
-    public async Task CreateAsync_adds_product_and_returns_response()
+    public async Task CreateAsync_stages_product_commits_once_and_returns_stock()
     {
         var repository = new FakeProductRepository();
-        var service = new ProductService(repository);
-        var request = new CreateProductRequest("SKU-001", "Product", 99m);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(repository, unitOfWork);
+        var request = new CreateProductRequest("SKU-001", "Product", 99m, 6);
 
         var result = await service.CreateAsync(request, CancellationToken.None);
 
@@ -39,35 +40,40 @@ public sealed class ProductServiceTests
         Assert.Equal(request.Sku, product.Sku);
         Assert.Equal(request.Name, product.Name);
         Assert.Equal(request.Price, product.Price);
+        Assert.Equal(request.StockQuantity, product.StockQuantity);
         Assert.True(result.IsSuccess);
         AssertMatches(product, result.Value!);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task CreateAsync_duplicate_sku_returns_conflict_without_adding()
+    public async Task CreateAsync_duplicate_sku_returns_conflict_without_adding_or_committing()
     {
         var repository = new FakeProductRepository
         {
-            GetBySkuResult = new Product("SKU-001", "Existing", 10m)
+            GetBySkuResult = new Product("SKU-001", "Existing", 10m, 1)
         };
-        var service = new ProductService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(repository, unitOfWork);
 
         var result = await service.CreateAsync(
-            new CreateProductRequest("SKU-001", "Duplicate", 20m),
+            new CreateProductRequest("SKU-001", "Duplicate", 20m, 2),
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.DuplicateSku, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error?.Type);
         Assert.Empty(repository.AddedProducts);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task UpdateAsync_changes_details_without_changing_sku()
+    public async Task UpdateAsync_changes_details_preserves_sku_and_stock_and_commits_once()
     {
-        var product = new Product("STABLE-SKU", "Original", 10m);
+        var product = new Product("STABLE-SKU", "Original", 10m, 5);
         var repository = new FakeProductRepository { GetByIdResult = product };
-        var service = new ProductService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(repository, unitOfWork);
 
         var result = await service.UpdateAsync(
             product.Id,
@@ -78,15 +84,17 @@ public sealed class ProductServiceTests
         Assert.Equal("STABLE-SKU", product.Sku);
         Assert.Equal("Updated", product.Name);
         Assert.Equal(20m, product.Price);
-        Assert.Same(product, Assert.Single(repository.UpdatedProducts));
+        Assert.Equal(5, product.StockQuantity);
         Assert.Equal("STABLE-SKU", result.Value?.Sku);
+        Assert.Equal(5, result.Value?.StockQuantity);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task UpdateAsync_missing_product_returns_not_found_without_updating()
+    public async Task UpdateAsync_missing_product_returns_not_found_without_committing()
     {
-        var repository = new FakeProductRepository();
-        var service = new ProductService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(new FakeProductRepository(), unitOfWork);
 
         var result = await service.UpdateAsync(
             Guid.NewGuid(),
@@ -95,35 +103,79 @@ public sealed class ProductServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.NotFound, result.Error);
-        Assert.Empty(repository.UpdatedProducts);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task DeleteAsync_existing_product_deactivates_and_updates()
+    public async Task UpdateAsync_concurrency_failure_returns_conflict()
     {
-        var product = new Product("SKU-001", "Product", 10m);
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = SaveChangesResult.ConcurrencyConflict
+        };
+        var service = new ProductService(
+            new FakeProductRepository { GetByIdResult = product },
+            unitOfWork);
+
+        var result = await service.UpdateAsync(
+            product.Id,
+            new UpdateProductRequest("Updated", 20m),
+            CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ProductErrors.ConcurrentModification, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error?.Type);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_existing_product_deactivates_and_commits_once()
+    {
+        var product = new Product("SKU-001", "Product", 10m, 1);
         var repository = new FakeProductRepository { GetByIdResult = product };
-        var service = new ProductService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(repository, unitOfWork);
 
         var result = await service.DeleteAsync(product.Id, CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(product.Id, result.Value);
         Assert.False(product.IsActive);
-        Assert.Same(product, Assert.Single(repository.UpdatedProducts));
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task DeleteAsync_missing_product_returns_not_found_without_updating()
+    public async Task DeleteAsync_missing_product_returns_not_found_without_committing()
     {
-        var repository = new FakeProductRepository();
-        var service = new ProductService(repository);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new ProductService(new FakeProductRepository(), unitOfWork);
 
         var result = await service.DeleteAsync(Guid.NewGuid(), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.NotFound, result.Error);
-        Assert.Empty(repository.UpdatedProducts);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_concurrency_failure_returns_conflict()
+    {
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = SaveChangesResult.ConcurrencyConflict
+        };
+        var service = new ProductService(
+            new FakeProductRepository { GetByIdResult = product },
+            unitOfWork);
+
+        var result = await service.DeleteAsync(product.Id, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ProductErrors.ConcurrentModification, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error?.Type);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     private static void AssertMatches(Product product, ProductResponse response)
@@ -132,6 +184,7 @@ public sealed class ProductServiceTests
         Assert.Equal(product.Sku, response.Sku);
         Assert.Equal(product.Name, response.Name);
         Assert.Equal(product.Price, response.Price);
+        Assert.Equal(product.StockQuantity, response.StockQuantity);
         Assert.Equal(product.CreationDate, response.CreationDate);
     }
 }

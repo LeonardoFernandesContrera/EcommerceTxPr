@@ -2,6 +2,7 @@ using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Application.Orders.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Persistence;
 using EcommerceTxPr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,8 +20,10 @@ namespace EcommerceTxPr.Infrastructure
             services.AddScoped<ICustomerRepository, CustomerRepository>();
             services.AddScoped<IProductRepository, ProductRepository>();
             services.AddScoped<IOrderRepository, OrderRepository>();
+            services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
             return services;
         }
     }
 }
+using EcommerceTxPr.Application.Common;

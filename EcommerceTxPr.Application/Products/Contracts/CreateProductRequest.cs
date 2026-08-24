@@ -16,4 +16,6 @@ public sealed record CreateProductRequest(
         ErrorMessage = "Price must be greater than zero.",
         ParseLimitsInInvariantCulture = true,
         ConvertValueInInvariantCulture = true)]
-    decimal Price);
+    decimal Price,
+    [Range(0, int.MaxValue, ErrorMessage = "Initial stock cannot be negative.")]
+    int StockQuantity);

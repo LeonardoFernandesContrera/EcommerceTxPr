@@ -12,7 +12,7 @@ public sealed class ProductApiTests
     {
         using var factory = new CustomerApiFactory();
         using var client = factory.CreateClientWithDatabase();
-        var request = new CreateProductRequest("SKU-001", "Product", 125.50m);
+        var request = new CreateProductRequest("SKU-001", "Product", 125.50m, 7);
 
         using var postResponse = await client.PostAsJsonAsync("/api/products", request);
 
@@ -23,6 +23,7 @@ public sealed class ProductApiTests
         Assert.Equal(request.Sku, created.Sku);
         Assert.Equal(request.Name, created.Name);
         Assert.Equal(request.Price, created.Price);
+        Assert.Equal(request.StockQuantity, created.StockQuantity);
 
         var location = postResponse.Headers.Location;
         Assert.NotNull(location);
@@ -46,7 +47,7 @@ public sealed class ProductApiTests
 
         using var response = await client.PostAsJsonAsync(
             "/api/products",
-            new CreateProductRequest("SKU-001", "Duplicate", 200m));
+            new CreateProductRequest("SKU-001", "Duplicate", 200m, 3));
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,

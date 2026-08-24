@@ -15,6 +15,7 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
             .IsRequired();
 
         builder.HasIndex(product => product.Sku)
+            .HasDatabaseName("UX_Products_Sku")
             .IsUnique();
 
         builder.Property(product => product.Name)
@@ -25,7 +26,15 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
             .HasPrecision(18, 2)
             .IsRequired();
 
+        builder.Property(product => product.StockQuantity)
+            .IsRequired();
+
         builder.Property(product => product.IsActive)
+            .IsRequired();
+
+        builder.Property(product => product.Version)
+            .IsConcurrencyToken()
+            .ValueGeneratedNever()
             .IsRequired();
     }
 }

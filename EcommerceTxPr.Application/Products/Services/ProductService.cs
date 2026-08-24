@@ -8,10 +8,14 @@ namespace EcommerceTxPr.Application.Products.Services;
 public sealed class ProductService : IProductService
 {
     private readonly IProductRepository _productRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public ProductService(IProductRepository productRepository)
+    public ProductService(
+        IProductRepository productRepository,
+        IUnitOfWork unitOfWork)
     {
         _productRepository = productRepository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<Result<IReadOnlyCollection<ProductResponse>, Error>> GetAllAsync(
@@ -54,11 +58,25 @@ public sealed class ProductService : IProductService
             return Result<ProductResponse, Error>.Failure(ProductErrors.DuplicateSku);
         }
 
-        var product = new Product(request.Sku, request.Name, request.Price);
+        var product = new Product(
+            request.Sku,
+            request.Name,
+            request.Price,
+            request.StockQuantity);
 
         await _productRepository
             .AddAsync(product, cancellationToken)
             .ConfigureAwait(false);
+
+        var saveResult = await _unitOfWork
+            .SaveChangesAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return Result<ProductResponse, Error>.Failure(
+                ProductErrors.ConcurrentModification);
+        }
 
         return Result<ProductResponse, Error>.Success(ToResponse(product));
     }
@@ -79,9 +97,15 @@ public sealed class ProductService : IProductService
 
         product.UpdateDetails(request.Name, request.Price);
 
-        await _productRepository
-            .UpdateAsync(product, cancellationToken)
+        var saveResult = await _unitOfWork
+            .SaveChangesAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return Result<ProductResponse, Error>.Failure(
+                ProductErrors.ConcurrentModification);
+        }
 
         return Result<ProductResponse, Error>.Success(ToResponse(product));
     }
@@ -101,9 +125,15 @@ public sealed class ProductService : IProductService
 
         product.Deactivate();
 
-        await _productRepository
-            .UpdateAsync(product, cancellationToken)
+        var saveResult = await _unitOfWork
+            .SaveChangesAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return Result<Guid, Error>.Failure(
+                ProductErrors.ConcurrentModification);
+        }
 
         return Result<Guid, Error>.Success(product.Id);
     }
@@ -115,6 +145,7 @@ public sealed class ProductService : IProductService
             product.Sku,
             product.Name,
             product.Price,
+            product.StockQuantity,
             product.CreationDate);
     }
 }

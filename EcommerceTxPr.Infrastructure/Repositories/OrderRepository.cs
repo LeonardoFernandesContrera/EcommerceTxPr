@@ -32,7 +32,5 @@ public sealed class OrderRepository : IOrderRepository
         await _context.Orders
             .AddAsync(order, cancellationToken)
             .ConfigureAwait(false);
-
-        await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 }

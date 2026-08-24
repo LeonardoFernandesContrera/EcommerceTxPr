@@ -7,6 +7,5 @@ namespace EcommerceTxPr.Application.Customers.Repositories
         Task<IReadOnlyCollection<Customer>> GetAllAsync(CancellationToken cancellationToken);
         Task<Customer?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
         Task AddAsync(Customer customer, CancellationToken cancellationToken);
-        Task UpdateAsync(Customer customer, CancellationToken cancellationToken);
     }
 }

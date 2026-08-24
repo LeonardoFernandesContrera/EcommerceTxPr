@@ -57,7 +57,6 @@ public sealed class ProductRepository : IProductRepository
         }
 
         return await _context.Products
-            .AsNoTracking()
             .Where(product => ids.Contains(product.Id) && product.IsActive)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -70,20 +69,5 @@ public sealed class ProductRepository : IProductRepository
         await _context.Products
             .AddAsync(product, cancellationToken)
             .ConfigureAwait(false);
-
-        await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task UpdateAsync(
-        Product product,
-        CancellationToken cancellationToken)
-    {
-        if (_context.Entry(product).State == EntityState.Detached)
-        {
-            throw new InvalidOperationException(
-                "A product must be loaded by this repository before it can be updated.");
-        }
-
-        await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 }

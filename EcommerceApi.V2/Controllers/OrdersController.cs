@@ -34,6 +34,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     [ProducesResponseType<OrderResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<OrderResponse>> Create(
         [FromBody] CreateOrderRequest request,
         CancellationToken cancellationToken)

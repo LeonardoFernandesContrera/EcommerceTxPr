@@ -12,8 +12,6 @@ internal sealed class FakeCustomerRepository : ICustomerRepository
 
     public List<Customer> AddedCustomers { get; } = new();
 
-    public List<Customer> UpdatedCustomers { get; } = new();
-
     public Task<IReadOnlyCollection<Customer>> GetAllAsync(
         CancellationToken cancellationToken)
     {
@@ -35,11 +33,4 @@ internal sealed class FakeCustomerRepository : ICustomerRepository
         return Task.CompletedTask;
     }
 
-    public Task UpdateAsync(
-        Customer customer,
-        CancellationToken cancellationToken)
-    {
-        UpdatedCustomers.Add(customer);
-        return Task.CompletedTask;
-    }
 }

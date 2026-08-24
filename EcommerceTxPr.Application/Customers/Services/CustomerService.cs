@@ -8,10 +8,14 @@ namespace EcommerceTxPr.Application.Customers.Services
     public sealed class CustomerService : ICustomerService
     {
         private readonly ICustomerRepository _customerRepository;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public CustomerService(ICustomerRepository customerRepository)
+        public CustomerService(
+            ICustomerRepository customerRepository,
+            IUnitOfWork unitOfWork)
         {
             _customerRepository = customerRepository;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<Result<IReadOnlyCollection<CustomerResponse>, Error>> GetAllAsync(
@@ -54,6 +58,10 @@ namespace EcommerceTxPr.Application.Customers.Services
                 .AddAsync(customer, cancellationToken)
                 .ConfigureAwait(false);
 
+            await _unitOfWork
+                .SaveChangesAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             return Result<CustomerResponse, Error>.Success(ToResponse(customer));
         }
 
@@ -73,8 +81,8 @@ namespace EcommerceTxPr.Application.Customers.Services
 
             customer.UpdateDetails(request.Name, request.BirthDate);
 
-            await _customerRepository
-                .UpdateAsync(customer, cancellationToken)
+            await _unitOfWork
+                .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             return Result<CustomerResponse, Error>.Success(ToResponse(customer));
@@ -95,8 +103,8 @@ namespace EcommerceTxPr.Application.Customers.Services
 
             customer.Deactivate();
 
-            await _customerRepository
-                .UpdateAsync(customer, cancellationToken)
+            await _unitOfWork
+                .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             return Result<Guid, Error>.Success(customer.Id);

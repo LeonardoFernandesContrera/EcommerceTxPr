@@ -106,6 +106,24 @@ public sealed class OrderTests
     }
 
     [Fact]
+    public void AddItem_rejects_conflicting_duplicate_product_snapshot()
+    {
+        var order = new Order(Guid.NewGuid());
+        var productId = Guid.NewGuid();
+        order.AddItem(productId, "Original", 10m, 2);
+
+        Assert.Throws<InvalidOperationException>(
+            () => order.AddItem(productId, "Changed", 10m, 1));
+        Assert.Throws<InvalidOperationException>(
+            () => order.AddItem(productId, "Original", 11m, 1));
+
+        var item = Assert.Single(order.Items);
+        Assert.Equal("Original", item.ProductName);
+        Assert.Equal(10m, item.UnitPrice);
+        Assert.Equal(2, item.Quantity);
+    }
+
+    [Fact]
     public void Total_is_calculated_from_order_items()
     {
         var order = new Order(Guid.NewGuid());
