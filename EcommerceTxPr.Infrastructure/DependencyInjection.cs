@@ -1,3 +1,4 @@
+using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Application.Orders.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
@@ -26,4 +27,3 @@ namespace EcommerceTxPr.Infrastructure
         }
     }
 }
-using EcommerceTxPr.Application.Common;
