@@ -10,6 +10,8 @@ internal sealed class FakeCustomerRepository : ICustomerRepository
 
     public Customer? GetByIdResult { get; set; }
 
+    public List<Guid> GetByIdRequests { get; } = new();
+
     public List<Customer> AddedCustomers { get; } = new();
 
     public Task<IReadOnlyCollection<Customer>> GetAllAsync(
@@ -22,6 +24,7 @@ internal sealed class FakeCustomerRepository : ICustomerRepository
         Guid id,
         CancellationToken cancellationToken)
     {
+        GetByIdRequests.Add(id);
         return Task.FromResult(GetByIdResult);
     }
 

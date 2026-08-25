@@ -13,6 +13,85 @@ namespace EcommerceTxPr.UnitTests.Application;
 public sealed class OrderServiceTests
 {
     [Fact]
+    public async Task CreateAsync_consumes_stock_stages_order_and_commits_once()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 5);
+        var orderRepository = new FakeOrderRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            orderRepository,
+            unitOfWork);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        var result = await service.CreateAsync(request, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, product.StockQuantity);
+        Assert.Single(orderRepository.AddedOrders);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_duplicate_product_quantities_merge_and_consume_total_stock()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 6);
+        var orderRepository = new FakeOrderRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            orderRepository,
+            unitOfWork);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[]
+            {
+                new CreateOrderItemRequest(product.Id, 2),
+                new CreateOrderItemRequest(product.Id, 3)
+            });
+
+        var result = await service.CreateAsync(request, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, product.StockQuantity);
+        var order = Assert.Single(orderRepository.AddedOrders);
+        Assert.Equal(5, Assert.Single(order.Items).Quantity);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_insufficient_stock_does_not_mutate_stage_or_commit()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 2);
+        var orderRepository = new FakeOrderRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            orderRepository,
+            unitOfWork);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 3) });
+
+        var result = await service.CreateAsync(request, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ProductErrors.InsufficientStock, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error?.Type);
+        Assert.Equal(2, product.StockQuantity);
+        Assert.Empty(orderRepository.AddedOrders);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
     public async Task CreateAsync_valid_request_decrements_aggregated_stock_and_commits_once()
     {
         var customer = new Customer("Customer", new DateTime(1990, 1, 1));
@@ -83,8 +162,9 @@ public sealed class OrderServiceTests
         var productRepository = new FakeProductRepository();
         var orderRepository = new FakeOrderRepository();
         var unitOfWork = new FakeUnitOfWork();
+        var customerRepository = new FakeCustomerRepository();
         var service = new OrderService(
-            new FakeCustomerRepository(),
+            customerRepository,
             productRepository,
             orderRepository,
             unitOfWork);
@@ -95,6 +175,8 @@ public sealed class OrderServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(OrderErrors.InvalidCustomer, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error?.Type);
+        Assert.Empty(customerRepository.GetByIdRequests);
         Assert.Empty(productRepository.GetByIdsRequests);
         Assert.Empty(orderRepository.AddedOrders);
         Assert.Equal(0, unitOfWork.SaveChangesCalls);
