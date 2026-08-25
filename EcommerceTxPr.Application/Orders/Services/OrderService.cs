@@ -87,8 +87,12 @@ public sealed class OrderService : IOrderService
 
         if (customer is null)
         {
-            return Result<OrderCreationResponse, Error>.Failure(
-                CustomerErrors.NotFound);
+            return await ReconcileOrFailAsync(
+                    CustomerErrors.NotFound,
+                    key.KeyHash,
+                    normalizedRequest.RequestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var productIds = normalizedRequest.Items
@@ -103,16 +107,24 @@ public sealed class OrderService : IOrderService
 
         if (productIds.Any(productId => !productsById.ContainsKey(productId)))
         {
-            return Result<OrderCreationResponse, Error>.Failure(
-                ProductErrors.NotFound);
+            return await ReconcileOrFailAsync(
+                    ProductErrors.NotFound,
+                    key.KeyHash,
+                    normalizedRequest.RequestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (normalizedRequest.Items.Any(requested =>
                 productsById[requested.ProductId].StockQuantity
                     < requested.Quantity))
         {
-            return Result<OrderCreationResponse, Error>.Failure(
-                ProductErrors.InsufficientStock);
+            return await ReconcileOrFailAsync(
+                    ProductErrors.InsufficientStock,
+                    key.KeyHash,
+                    normalizedRequest.RequestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var order = new Order(customer.Id);
@@ -197,6 +209,25 @@ public sealed class OrderService : IOrderService
                 new OrderCreationResponse(
                     ToResponse(order),
                     OrderCreationStatus.Replayed));
+    }
+
+    private async Task<Result<OrderCreationResponse, Error>> ReconcileOrFailAsync(
+        Error fallbackError,
+        string keyHash,
+        string requestHash,
+        CancellationToken cancellationToken)
+    {
+        var record = await _idempotencyRepository
+            .GetByKeyHashAsync(keyHash, cancellationToken)
+            .ConfigureAwait(false);
+
+        return record is null
+            ? Result<OrderCreationResponse, Error>.Failure(fallbackError)
+            : await ReconcileAsync(
+                    record,
+                    requestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
     }
 
     private static OrderResponse ToResponse(Order order)

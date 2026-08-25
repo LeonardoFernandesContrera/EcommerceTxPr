@@ -162,7 +162,13 @@ public sealed class OrderApiTests
         var created = await firstResponse.Content.ReadFromJsonAsync<OrderResponse>();
         var replayed = await secondResponse.Content.ReadFromJsonAsync<OrderResponse>();
         Assert.NotNull(created);
-        Assert.Equal(created, replayed);
+        Assert.NotNull(replayed);
+        Assert.Equal(created.Id, replayed.Id);
+        Assert.Equal(created.CustomerId, replayed.CustomerId);
+        Assert.Equal(created.Status, replayed.Status);
+        Assert.Equal(created.CreationDate, replayed.CreationDate);
+        Assert.Equal(created.Total, replayed.Total);
+        Assert.Equal(created.Items, replayed.Items);
         using var productResponse = await client.GetAsync(
             $"/api/products/{product.Id}");
         var persistedProduct = await productResponse.Content

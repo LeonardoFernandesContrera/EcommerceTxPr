@@ -224,6 +224,50 @@ public sealed class OrderServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_winner_committed_before_stock_validation_replays_instead_of_failing_stock()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var exhaustedProduct = new Product("SKU-001", "Product", 10m, 0);
+        var request = ValidRequest(customer.Id, exhaustedProduct.Id);
+        var normalizedRequest = OrderRequestFingerprint.Create(request).Value!;
+        var key = OrderIdempotencyKey.Create("race-key").Value!;
+        var winningOrder = CreatePlacedOrder(customer.Id, exhaustedProduct);
+        var winningRecord = new OrderIdempotencyRecord(
+            key.KeyHash,
+            normalizedRequest.RequestHash,
+            winningOrder.Id);
+        var orderRepository = new FakeOrderRepository
+        {
+            GetByIdResult = winningOrder
+        };
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        idempotencyRepository.EnqueueGetResult(null);
+        idempotencyRepository.EnqueueGetResult(winningRecord);
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository
+            {
+                GetByIdsResult = new[] { exhaustedProduct }
+            },
+            orderRepository,
+            idempotencyRepository,
+            unitOfWork);
+
+        var result = await service.CreateAsync(
+            request,
+            "race-key",
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(OrderCreationStatus.Replayed, result.Value?.Status);
+        Assert.Equal(winningOrder.Id, result.Value?.Order.Id);
+        Assert.Empty(orderRepository.AddedOrders);
+        Assert.Equal(2, idempotencyRepository.GetByKeyHashRequests.Count);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
     public async Task CreateAsync_invalid_key_returns_validation_before_any_repository_access()
     {
         var customerRepository = new FakeCustomerRepository();
