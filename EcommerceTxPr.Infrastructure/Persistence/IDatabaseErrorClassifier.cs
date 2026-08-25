@@ -5,4 +5,6 @@ namespace EcommerceTxPr.Infrastructure.Persistence;
 public interface IDatabaseErrorClassifier
 {
     bool IsIdempotencyConflict(DbUpdateException exception);
+
+    bool IsPaymentConflict(DbUpdateException exception);
 }

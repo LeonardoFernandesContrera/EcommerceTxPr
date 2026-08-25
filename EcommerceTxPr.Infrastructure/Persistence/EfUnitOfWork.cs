@@ -37,12 +37,19 @@ public sealed class EfUnitOfWork : IUnitOfWork
         {
             var isIdempotencyConflict = _errorClassifier
                 .IsIdempotencyConflict(exception);
+            var isPaymentConflict = _errorClassifier
+                .IsPaymentConflict(exception);
 
             _context.ChangeTracker.Clear();
 
             if (isIdempotencyConflict)
             {
                 return SaveChangesResult.IdempotencyConflict;
+            }
+
+            if (isPaymentConflict)
+            {
+                return SaveChangesResult.PaymentConflict;
             }
 
             throw;

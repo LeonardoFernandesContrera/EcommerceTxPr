@@ -13,6 +13,13 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSimulatedDevelopmentPaymentGateway(
+        builder.Configuration);
+}
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddHealthChecks();

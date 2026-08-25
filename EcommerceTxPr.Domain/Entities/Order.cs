@@ -75,6 +75,17 @@ public sealed class Order : BaseEntity
         Status = OrderStatus.Pending;
     }
 
+    public void MarkPaid()
+    {
+        if (Status != OrderStatus.Pending)
+        {
+            throw new InvalidOperationException(
+                "Only pending orders can be marked as paid.");
+        }
+
+        Status = OrderStatus.Paid;
+    }
+
     private void EnsureDraft()
     {
         if (Status != OrderStatus.Draft)

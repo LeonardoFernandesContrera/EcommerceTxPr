@@ -1,3 +1,4 @@
+using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Customers;
 using EcommerceTxPr.Application.Customers.Contracts;
 using EcommerceTxPr.Application.Customers.Services;
@@ -153,6 +154,68 @@ public sealed class CustomerServiceTests
         Assert.False(result.IsSuccess);
         Assert.Equal(CustomerErrors.NotFound, result.Error);
         Assert.Equal(0, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_unknown_save_result_fails_closed()
+    {
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = (SaveChangesResult)999
+        };
+        var service = new CustomerService(
+            new FakeCustomerRepository(),
+            unitOfWork);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateAsync(
+                new CreateCustomerRequest(
+                    "Customer",
+                    new DateTime(1990, 1, 1)),
+                CancellationToken.None));
+
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_unknown_save_result_fails_closed()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = (SaveChangesResult)999
+        };
+        var service = new CustomerService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            unitOfWork);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateAsync(
+                customer.Id,
+                new UpdateCustomerRequest(
+                    "Updated",
+                    new DateTime(1991, 2, 2)),
+                CancellationToken.None));
+
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_unknown_save_result_fails_closed()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = (SaveChangesResult)999
+        };
+        var service = new CustomerService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            unitOfWork);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DeleteAsync(customer.Id, CancellationToken.None));
+
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     private static void AssertMatches(Customer customer, CustomerResponse response)

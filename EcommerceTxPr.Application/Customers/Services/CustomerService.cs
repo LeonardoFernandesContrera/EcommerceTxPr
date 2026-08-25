@@ -58,9 +58,11 @@ namespace EcommerceTxPr.Application.Customers.Services
                 .AddAsync(customer, cancellationToken)
                 .ConfigureAwait(false);
 
-            await _unitOfWork
+            var saveResult = await _unitOfWork
                 .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            EnsureSuccessfulSave(saveResult);
 
             return Result<CustomerResponse, Error>.Success(ToResponse(customer));
         }
@@ -81,9 +83,11 @@ namespace EcommerceTxPr.Application.Customers.Services
 
             customer.UpdateDetails(request.Name, request.BirthDate);
 
-            await _unitOfWork
+            var saveResult = await _unitOfWork
                 .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            EnsureSuccessfulSave(saveResult);
 
             return Result<CustomerResponse, Error>.Success(ToResponse(customer));
         }
@@ -103,11 +107,22 @@ namespace EcommerceTxPr.Application.Customers.Services
 
             customer.Deactivate();
 
-            await _unitOfWork
+            var saveResult = await _unitOfWork
                 .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
 
+            EnsureSuccessfulSave(saveResult);
+
             return Result<Guid, Error>.Success(customer.Id);
+        }
+
+        private static void EnsureSuccessfulSave(SaveChangesResult saveResult)
+        {
+            if (saveResult != SaveChangesResult.Success)
+            {
+                throw new InvalidOperationException(
+                    $"Unsupported save result: {saveResult}.");
+            }
         }
 
         private static CustomerResponse ToResponse(Customer customer)

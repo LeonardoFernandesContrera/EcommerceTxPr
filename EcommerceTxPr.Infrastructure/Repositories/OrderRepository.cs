@@ -25,6 +25,16 @@ public sealed class OrderRepository : IOrderRepository
             .ConfigureAwait(false);
     }
 
+    public async Task<Order?> GetByIdForPaymentAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        return await _context.Orders
+            .Include(order => order.Items)
+            .SingleOrDefaultAsync(order => order.Id == id, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task AddAsync(
         Order order,
         CancellationToken cancellationToken)

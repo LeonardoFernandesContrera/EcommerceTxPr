@@ -1,4 +1,5 @@
 using System.Data.Common;
+using EcommerceTxPr.Application.Payments.Gateways;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
@@ -71,6 +72,11 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
             services.AddScoped<
                 IDatabaseErrorClassifier,
                 SqliteDatabaseErrorClassifier>();
+
+            services.RemoveAll<IPaymentGateway>();
+            services.AddSingleton<DeterministicTestPaymentGateway>();
+            services.AddSingleton<IPaymentGateway>(serviceProvider =>
+                serviceProvider.GetRequiredService<DeterministicTestPaymentGateway>());
 
             _configureTestServices?.Invoke(services);
         });

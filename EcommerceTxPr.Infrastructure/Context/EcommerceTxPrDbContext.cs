@@ -15,6 +15,7 @@ namespace EcommerceTxPr.Infrastructure.Context
         public DbSet<Product> Products { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderIdempotencyRecord> OrderIdempotencyRecords { get; set; }
+        public DbSet<Payment> Payments { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

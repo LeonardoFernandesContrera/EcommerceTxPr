@@ -1,11 +1,15 @@
 using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Application.Orders.Repositories;
+using EcommerceTxPr.Application.Payments.Gateways;
+using EcommerceTxPr.Application.Payments.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.Infrastructure.Persistence;
+using EcommerceTxPr.Infrastructure.Payments;
 using EcommerceTxPr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace EcommerceTxPr.Infrastructure
@@ -21,6 +25,7 @@ namespace EcommerceTxPr.Infrastructure
             services.AddScoped<ICustomerRepository, CustomerRepository>();
             services.AddScoped<IProductRepository, ProductRepository>();
             services.AddScoped<IOrderRepository, OrderRepository>();
+            services.AddScoped<IPaymentRepository, PaymentRepository>();
             services.AddScoped<
                 IOrderIdempotencyRepository,
                 OrderIdempotencyRepository>();
@@ -28,6 +33,25 @@ namespace EcommerceTxPr.Infrastructure
                 IDatabaseErrorClassifier,
                 SqlServerDatabaseErrorClassifier>();
             services.AddScoped<IUnitOfWork, EfUnitOfWork>();
+
+            return services;
+        }
+
+        public static IServiceCollection AddSimulatedDevelopmentPaymentGateway(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            services
+                .AddOptions<SimulatedDevelopmentPaymentGatewayOptions>()
+                .Bind(configuration.GetSection(
+                    SimulatedDevelopmentPaymentGatewayOptions.SectionName))
+                .Validate(
+                    options => options.TryGetOutcome(out _),
+                    "PaymentGateway:SimulatedOutcome must be Succeeded or Failed.")
+                .ValidateOnStart();
+            services.AddScoped<
+                IPaymentGateway,
+                SimulatedDevelopmentPaymentGateway>();
 
             return services;
         }

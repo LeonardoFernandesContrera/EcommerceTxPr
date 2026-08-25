@@ -167,4 +167,37 @@ public sealed class OrderTests
         Assert.Throws<InvalidOperationException>(
             () => order.AddItem(Guid.NewGuid(), "Another", 20m, 1));
     }
+
+    [Fact]
+    public void MarkPaid_changes_pending_order_to_paid()
+    {
+        var order = new Order(Guid.NewGuid());
+        order.AddItem(Guid.NewGuid(), "Product", 10m, 1);
+        order.Place();
+
+        order.MarkPaid();
+
+        Assert.Equal(OrderStatus.Paid, order.Status);
+    }
+
+    [Fact]
+    public void MarkPaid_rejects_draft_order()
+    {
+        var order = new Order(Guid.NewGuid());
+
+        Assert.Throws<InvalidOperationException>(() => order.MarkPaid());
+        Assert.Equal(OrderStatus.Draft, order.Status);
+    }
+
+    [Fact]
+    public void MarkPaid_rejects_paid_order()
+    {
+        var order = new Order(Guid.NewGuid());
+        order.AddItem(Guid.NewGuid(), "Product", 10m, 1);
+        order.Place();
+        order.MarkPaid();
+
+        Assert.Throws<InvalidOperationException>(() => order.MarkPaid());
+        Assert.Equal(OrderStatus.Paid, order.Status);
+    }
 }

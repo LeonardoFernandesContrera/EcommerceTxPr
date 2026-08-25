@@ -67,4 +67,24 @@ internal static class ApiTestData
 
         return await client.SendAsync(message);
     }
+
+    public static async Task<OrderResponse> CreateOrderAsync(
+        HttpClient client,
+        Guid customerId,
+        Guid productId,
+        int quantity = 1,
+        string? idempotencyKey = null)
+    {
+        using var response = await PostOrderAsync(
+            client,
+            new CreateOrderRequest(
+                customerId,
+                new[] { new CreateOrderItemRequest(productId, quantity) }),
+            idempotencyKey ?? $"order-{Guid.NewGuid():N}");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(order);
+        return order;
+    }
 }

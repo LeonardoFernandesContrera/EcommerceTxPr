@@ -586,6 +586,60 @@ public sealed class OrderApiTests
         await AssertPersistenceCountsAsync(factory, 0, 0);
     }
 
+    [Fact]
+    public async Task Failed_order_does_not_permanently_consume_idempotency_key()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 0);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 1) });
+        const string idempotencyKey = "reusable-after-failure";
+
+        using (var failedResponse = await ApiTestData.PostOrderAsync(
+                   client,
+                   request,
+                   idempotencyKey))
+        {
+            await ApiTestAssertions.AssertProblemDetailsAsync(
+                failedResponse,
+                HttpStatusCode.Conflict,
+                "Product.InsufficientStock");
+        }
+
+        await AssertPersistenceCountsAsync(factory, 0, 0);
+        using (var stockScope = factory.Services.CreateScope())
+        {
+            var context = stockScope.ServiceProvider
+                .GetRequiredService<EcommerceTxPrDbContext>();
+            var trackedProduct = await context.Products.SingleAsync(
+                candidate => candidate.Id == product.Id);
+            trackedProduct.IncreaseStock(1);
+            await context.SaveChangesAsync();
+        }
+
+        using var retryResponse = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            idempotencyKey);
+
+        Assert.Equal(HttpStatusCode.Created, retryResponse.StatusCode);
+        await AssertPersistenceCountsAsync(factory, 1, 1);
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationContext = verificationScope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        Assert.Equal(
+            0,
+            await verificationContext.Products
+                .Where(candidate => candidate.Id == product.Id)
+                .Select(candidate => candidate.StockQuantity)
+                .SingleAsync());
+    }
+
     private static void AssertItem(
         OrderItemResponse item,
         ProductResponse product,
