@@ -1,5 +1,6 @@
 using EcommerceTxPr.Application.Orders.Idempotency;
 using EcommerceTxPr.Domain.Entities;
+using EcommerceTxPr.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceTxPr.Infrastructure.Context
@@ -16,6 +17,7 @@ namespace EcommerceTxPr.Infrastructure.Context
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderIdempotencyRecord> OrderIdempotencyRecords { get; set; }
         public DbSet<Payment> Payments { get; set; }
+        public DbSet<OutboxMessage> OutboxMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -1,5 +1,7 @@
 using EcommerceTxPr.Application.Common;
+using EcommerceTxPr.Domain.Events;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Outbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceTxPr.Infrastructure.Persistence;
@@ -20,11 +22,33 @@ public sealed class EfUnitOfWork : IUnitOfWork
     public async Task<SaveChangesResult> SaveChangesAsync(
         CancellationToken cancellationToken)
     {
+        var eventSnapshots = _context.ChangeTracker
+            .Entries()
+            .Select(entry => entry.Entity)
+            .OfType<IHasDomainEvents>()
+            .Where(owner => owner.DomainEvents.Count > 0)
+            .Select(owner => (
+                Owner: owner,
+                Events: owner.DomainEvents.ToArray()))
+            .ToArray();
+
+        var outboxMessages = eventSnapshots
+            .SelectMany(snapshot => snapshot.Events)
+            .Select(DomainEventOutboxMapper.Map)
+            .ToArray();
+
+        _context.OutboxMessages.AddRange(outboxMessages);
+
         try
         {
             await _context
                 .SaveChangesAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            foreach (var snapshot in eventSnapshots)
+            {
+                snapshot.Owner.ClearDomainEvents();
+            }
 
             return SaveChangesResult.Success;
         }

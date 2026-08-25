@@ -1,5 +1,6 @@
 using EcommerceTxPr.Domain.Entities;
 using EcommerceTxPr.Domain.Enums;
+using EcommerceTxPr.Domain.Events;
 
 namespace EcommerceTxPr.UnitTests.Domain;
 
@@ -55,6 +56,29 @@ public sealed class PaymentTests
         Assert.Equal(originalCreationDate, payment.CreationDate);
     }
 
+    [Fact]
+    public void MarkSucceeded_records_one_payment_succeeded_domain_event()
+    {
+        var beforeTransition = DateTime.UtcNow;
+        var payment = new Payment(Guid.NewGuid(), 25m);
+
+        payment.MarkSucceeded("provider-reference");
+
+        var afterTransition = DateTime.UtcNow;
+        var domainEvents = ((IHasDomainEvents)payment).DomainEvents;
+        var domainEvent = Assert.IsType<PaymentSucceededDomainEvent>(
+            Assert.Single(domainEvents));
+        Assert.Equal(payment.Id, domainEvent.PaymentId);
+        Assert.Equal(payment.OrderId, domainEvent.OrderId);
+        Assert.Equal(25m, domainEvent.Amount);
+        Assert.Equal("provider-reference", domainEvent.ProviderReference);
+        Assert.Equal(DateTimeKind.Utc, domainEvent.OccurredOnUtc.Kind);
+        Assert.InRange(
+            domainEvent.OccurredOnUtc,
+            beforeTransition,
+            afterTransition);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -66,6 +90,7 @@ public sealed class PaymentTests
         Assert.Throws<ArgumentException>(
             () => payment.MarkSucceeded(value!));
         Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Empty(((IHasDomainEvents)payment).DomainEvents);
     }
 
     [Fact]
@@ -84,6 +109,29 @@ public sealed class PaymentTests
         Assert.Equal(originalCreationDate, payment.CreationDate);
     }
 
+    [Fact]
+    public void MarkFailed_records_one_payment_failed_domain_event()
+    {
+        var beforeTransition = DateTime.UtcNow;
+        var payment = new Payment(Guid.NewGuid(), 25m);
+
+        payment.MarkFailed("Declined");
+
+        var afterTransition = DateTime.UtcNow;
+        var domainEvents = ((IHasDomainEvents)payment).DomainEvents;
+        var domainEvent = Assert.IsType<PaymentFailedDomainEvent>(
+            Assert.Single(domainEvents));
+        Assert.Equal(payment.Id, domainEvent.PaymentId);
+        Assert.Equal(payment.OrderId, domainEvent.OrderId);
+        Assert.Equal(25m, domainEvent.Amount);
+        Assert.Equal("Declined", domainEvent.FailureCode);
+        Assert.Equal(DateTimeKind.Utc, domainEvent.OccurredOnUtc.Kind);
+        Assert.InRange(
+            domainEvent.OccurredOnUtc,
+            beforeTransition,
+            afterTransition);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -94,6 +142,7 @@ public sealed class PaymentTests
 
         Assert.Throws<ArgumentException>(() => payment.MarkFailed(value!));
         Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Empty(((IHasDomainEvents)payment).DomainEvents);
     }
 
     [Fact]
@@ -116,5 +165,7 @@ public sealed class PaymentTests
         Assert.Null(succeeded.FailureCode);
         Assert.Equal("Declined", failed.FailureCode);
         Assert.Null(failed.ProviderReference);
+        Assert.Single(((IHasDomainEvents)succeeded).DomainEvents);
+        Assert.Single(((IHasDomainEvents)failed).DomainEvents);
     }
 }

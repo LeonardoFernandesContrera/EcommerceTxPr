@@ -1,9 +1,12 @@
 using EcommerceTxPr.Domain.Enums;
+using EcommerceTxPr.Domain.Events;
 
 namespace EcommerceTxPr.Domain.Entities;
 
-public sealed class Payment : BaseEntity
+public sealed class Payment : BaseEntity, IHasDomainEvents
 {
+    private readonly List<IDomainEvent> _domainEvents = new();
+
     private Payment()
     {
     }
@@ -39,6 +42,9 @@ public sealed class Payment : BaseEntity
 
     public string? FailureCode { get; private set; }
 
+    IReadOnlyCollection<IDomainEvent> IHasDomainEvents.DomainEvents =>
+        _domainEvents.AsReadOnly();
+
     public void MarkSucceeded(string providerReference)
     {
         EnsurePending();
@@ -47,6 +53,12 @@ public sealed class Payment : BaseEntity
         ProviderReference = providerReference;
         FailureCode = null;
         Status = PaymentStatus.Succeeded;
+        _domainEvents.Add(new PaymentSucceededDomainEvent(
+            Id,
+            OrderId,
+            Amount,
+            providerReference,
+            DateTime.UtcNow));
     }
 
     public void MarkFailed(string failureCode)
@@ -57,6 +69,17 @@ public sealed class Payment : BaseEntity
         ProviderReference = null;
         FailureCode = failureCode;
         Status = PaymentStatus.Failed;
+        _domainEvents.Add(new PaymentFailedDomainEvent(
+            Id,
+            OrderId,
+            Amount,
+            failureCode,
+            DateTime.UtcNow));
+    }
+
+    void IHasDomainEvents.ClearDomainEvents()
+    {
+        _domainEvents.Clear();
     }
 
     private void EnsurePending()

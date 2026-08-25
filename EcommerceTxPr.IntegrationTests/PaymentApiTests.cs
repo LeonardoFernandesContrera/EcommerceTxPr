@@ -142,6 +142,7 @@ public sealed class PaymentApiTests
         var context = scope.ServiceProvider
             .GetRequiredService<EcommerceTxPrDbContext>();
         Assert.Equal(1, await context.Payments.CountAsync());
+        Assert.Equal(1, await context.OutboxMessages.CountAsync());
     }
 
     [Fact]

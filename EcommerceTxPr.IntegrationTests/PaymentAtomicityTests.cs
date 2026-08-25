@@ -2,6 +2,7 @@ using System.Net;
 using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Domain.Entities;
 using EcommerceTxPr.Domain.Enums;
+using EcommerceTxPr.Domain.Events;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.Infrastructure.Persistence;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
@@ -44,6 +45,7 @@ public sealed class PaymentAtomicityTests
             "Payment.AlreadyExists");
         Assert.True(race.HasRun);
         Assert.True(race.LosingTrackerWasCleared);
+        Assert.True(race.LosingDomainEventWasPreserved);
         Assert.Single(gateway.Requests);
         using var verificationScope = factory.Services.CreateScope();
         var context = verificationScope.ServiceProvider
@@ -62,6 +64,12 @@ public sealed class PaymentAtomicityTests
         Assert.Equal("WinningPayment", persistedPayment.FailureCode);
         Assert.False(await context.Payments.AnyAsync(candidate =>
             candidate.Status == PaymentStatus.Succeeded));
+        var persistedOutboxMessage = await context.OutboxMessages
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal("payment.failed.v1", persistedOutboxMessage.Type);
+        Assert.False(await context.OutboxMessages.AnyAsync(message =>
+            message.Type == "payment.succeeded.v1"));
     }
 
     private sealed class PaymentConflictRace
@@ -73,6 +81,8 @@ public sealed class PaymentAtomicityTests
         public bool HasRun => Volatile.Read(ref _hasRun) == 1;
 
         public bool LosingTrackerWasCleared { get; set; }
+
+        public bool LosingDomainEventWasPreserved { get; set; }
 
         public void Enable()
         {
@@ -108,8 +118,14 @@ public sealed class PaymentAtomicityTests
         public async Task<SaveChangesResult> SaveChangesAsync(
             CancellationToken cancellationToken)
         {
+            Payment? losingPayment = null;
+
             if (_race.TryBegin())
             {
+                losingPayment = _context.ChangeTracker
+                    .Entries<Payment>()
+                    .Single(entry => entry.State == EntityState.Added)
+                    .Entity;
                 await PersistWinningPaymentAsync(cancellationToken);
             }
 
@@ -118,6 +134,10 @@ public sealed class PaymentAtomicityTests
             _race.LosingTrackerWasCleared =
                 result == SaveChangesResult.PaymentConflict
                 && !_context.ChangeTracker.Entries().Any();
+            _race.LosingDomainEventWasPreserved =
+                result == SaveChangesResult.PaymentConflict
+                && losingPayment is not null
+                && ((IHasDomainEvents)losingPayment).DomainEvents.Count == 1;
             return result;
         }
 
@@ -137,7 +157,11 @@ public sealed class PaymentAtomicityTests
                 losingPayment.Amount);
             winningPayment.MarkFailed("WinningPayment");
             winningContext.Payments.Add(winningPayment);
-            await winningContext.SaveChangesAsync(cancellationToken);
+            var winningUnitOfWork = scope.ServiceProvider
+                .GetRequiredService<IUnitOfWork>();
+            Assert.Equal(
+                SaveChangesResult.Success,
+                await winningUnitOfWork.SaveChangesAsync(cancellationToken));
         }
     }
 }
