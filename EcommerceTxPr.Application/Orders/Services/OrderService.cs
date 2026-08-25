@@ -2,6 +2,7 @@ using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Customers;
 using EcommerceTxPr.Application.Customers.Repositories;
 using EcommerceTxPr.Application.Orders.Contracts;
+using EcommerceTxPr.Application.Orders.Idempotency;
 using EcommerceTxPr.Application.Orders.Repositories;
 using EcommerceTxPr.Application.Products;
 using EcommerceTxPr.Application.Products.Repositories;
@@ -14,17 +15,20 @@ public sealed class OrderService : IOrderService
     private readonly ICustomerRepository _customerRepository;
     private readonly IProductRepository _productRepository;
     private readonly IOrderRepository _orderRepository;
+    private readonly IOrderIdempotencyRepository _idempotencyRepository;
     private readonly IUnitOfWork _unitOfWork;
 
     public OrderService(
         ICustomerRepository customerRepository,
         IProductRepository productRepository,
         IOrderRepository orderRepository,
+        IOrderIdempotencyRepository idempotencyRepository,
         IUnitOfWork unitOfWork)
     {
         _customerRepository = customerRepository;
         _productRepository = productRepository;
         _orderRepository = orderRepository;
+        _idempotencyRepository = idempotencyRepository;
         _unitOfWork = unitOfWork;
     }
 
@@ -41,60 +45,55 @@ public sealed class OrderService : IOrderService
             : Result<OrderResponse, Error>.Success(ToResponse(order));
     }
 
-    public async Task<Result<OrderResponse, Error>> CreateAsync(
+    public async Task<Result<OrderCreationResponse, Error>> CreateAsync(
         CreateOrderRequest request,
+        string? idempotencyKey,
         CancellationToken cancellationToken)
     {
-        if (request.CustomerId == Guid.Empty)
+        var keyResult = OrderIdempotencyKey.Create(idempotencyKey);
+
+        if (!keyResult.IsSuccess)
         {
-            return Result<OrderResponse, Error>.Failure(
-                OrderErrors.InvalidCustomer);
+            return Result<OrderCreationResponse, Error>.Failure(
+                keyResult.Error!);
         }
 
-        if (request.Items is null || request.Items.Count == 0)
+        var fingerprintResult = OrderRequestFingerprint.Create(request);
+
+        if (!fingerprintResult.IsSuccess)
         {
-            return Result<OrderResponse, Error>.Failure(OrderErrors.Empty);
+            return Result<OrderCreationResponse, Error>.Failure(
+                fingerprintResult.Error!);
         }
 
-        if (request.Items.Any(item => item.ProductId == Guid.Empty))
-        {
-            return Result<OrderResponse, Error>.Failure(OrderErrors.InvalidProduct);
-        }
+        var key = keyResult.Value!;
+        var normalizedRequest = fingerprintResult.Value!;
+        var existingRecord = await _idempotencyRepository
+            .GetByKeyHashAsync(key.KeyHash, cancellationToken)
+            .ConfigureAwait(false);
 
-        if (request.Items.Any(item => item.Quantity <= 0))
+        if (existingRecord is not null)
         {
-            return Result<OrderResponse, Error>.Failure(OrderErrors.InvalidQuantity);
+            return await ReconcileAsync(
+                    existingRecord,
+                    normalizedRequest.RequestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         var customer = await _customerRepository
-            .GetByIdAsync(request.CustomerId, cancellationToken)
+            .GetByIdAsync(normalizedRequest.CustomerId, cancellationToken)
             .ConfigureAwait(false);
 
         if (customer is null)
         {
-            return Result<OrderResponse, Error>.Failure(CustomerErrors.NotFound);
+            return Result<OrderCreationResponse, Error>.Failure(
+                CustomerErrors.NotFound);
         }
 
-        var requestedQuantities = new Dictionary<Guid, int>();
-
-        try
-        {
-            foreach (var item in request.Items)
-            {
-                requestedQuantities[item.ProductId] = requestedQuantities.TryGetValue(
-                    item.ProductId,
-                    out var currentQuantity)
-                    ? checked(currentQuantity + item.Quantity)
-                    : item.Quantity;
-            }
-        }
-        catch (OverflowException)
-        {
-            return Result<OrderResponse, Error>.Failure(
-                OrderErrors.InvalidQuantity);
-        }
-
-        var productIds = requestedQuantities.Keys.ToArray();
+        var productIds = normalizedRequest.Items
+            .Select(item => item.ProductId)
+            .ToArray();
 
         var products = await _productRepository
             .GetByIdsAsync(productIds, cancellationToken)
@@ -104,27 +103,29 @@ public sealed class OrderService : IOrderService
 
         if (productIds.Any(productId => !productsById.ContainsKey(productId)))
         {
-            return Result<OrderResponse, Error>.Failure(ProductErrors.NotFound);
+            return Result<OrderCreationResponse, Error>.Failure(
+                ProductErrors.NotFound);
         }
 
-        if (requestedQuantities.Any(requested =>
-                productsById[requested.Key].StockQuantity < requested.Value))
+        if (normalizedRequest.Items.Any(requested =>
+                productsById[requested.ProductId].StockQuantity
+                    < requested.Quantity))
         {
-            return Result<OrderResponse, Error>.Failure(
+            return Result<OrderCreationResponse, Error>.Failure(
                 ProductErrors.InsufficientStock);
         }
 
         var order = new Order(customer.Id);
 
-        foreach (var requestedItem in requestedQuantities)
+        foreach (var requestedItem in normalizedRequest.Items)
         {
-            var product = productsById[requestedItem.Key];
+            var product = productsById[requestedItem.ProductId];
             order.AddItem(
                 product.Id,
                 product.Name,
                 product.Price,
-                requestedItem.Value);
-            product.DecreaseStock(requestedItem.Value);
+                requestedItem.Quantity);
+            product.DecreaseStock(requestedItem.Quantity);
         }
 
         order.Place();
@@ -133,17 +134,69 @@ public sealed class OrderService : IOrderService
             .AddAsync(order, cancellationToken)
             .ConfigureAwait(false);
 
+        var idempotencyRecord = new OrderIdempotencyRecord(
+            key.KeyHash,
+            normalizedRequest.RequestHash,
+            order.Id);
+
+        await _idempotencyRepository
+            .AddAsync(idempotencyRecord, cancellationToken)
+            .ConfigureAwait(false);
+
         var saveResult = await _unitOfWork
             .SaveChangesAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        if (saveResult is SaveChangesResult.ConcurrencyConflict
+            or SaveChangesResult.IdempotencyConflict)
         {
-            return Result<OrderResponse, Error>.Failure(
-                OrderErrors.InventoryChanged);
+            var winningRecord = await _idempotencyRepository
+                .GetByKeyHashAsync(key.KeyHash, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (winningRecord is null)
+            {
+                return Result<OrderCreationResponse, Error>.Failure(
+                    OrderErrors.InventoryChanged);
+            }
+
+            return await ReconcileAsync(
+                    winningRecord,
+                    normalizedRequest.RequestHash,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        return Result<OrderResponse, Error>.Success(ToResponse(order));
+        return Result<OrderCreationResponse, Error>.Success(
+            new OrderCreationResponse(
+                ToResponse(order),
+                OrderCreationStatus.Created));
+    }
+
+    private async Task<Result<OrderCreationResponse, Error>> ReconcileAsync(
+        OrderIdempotencyRecord record,
+        string requestHash,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(
+                record.RequestHash,
+                requestHash,
+                StringComparison.Ordinal))
+        {
+            return Result<OrderCreationResponse, Error>.Failure(
+                OrderErrors.IdempotencyKeyConflict);
+        }
+
+        var order = await _orderRepository
+            .GetByIdAsync(record.OrderId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return order is null
+            ? Result<OrderCreationResponse, Error>.Failure(OrderErrors.NotFound)
+            : Result<OrderCreationResponse, Error>.Success(
+                new OrderCreationResponse(
+                    ToResponse(order),
+                    OrderCreationStatus.Replayed));
     }
 
     private static OrderResponse ToResponse(Order order)

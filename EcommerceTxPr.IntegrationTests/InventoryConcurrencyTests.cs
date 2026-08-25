@@ -80,10 +80,12 @@ public sealed class InventoryConcurrencyTests
         winningProduct.DecreaseStock(1);
         await winningContext.SaveChangesAsync();
 
-        var result = await new EfUnitOfWork(staleContext)
-            .SaveChangesAsync(CancellationToken.None);
+        var unitOfWork = staleScope.ServiceProvider
+            .GetRequiredService<IUnitOfWork>();
+        var result = await unitOfWork.SaveChangesAsync(CancellationToken.None);
 
         Assert.Equal(SaveChangesResult.ConcurrencyConflict, result);
+        Assert.Empty(staleContext.ChangeTracker.Entries());
         using var verificationScope = factory.Services.CreateScope();
         var verificationContext = verificationScope.ServiceProvider
             .GetRequiredService<EcommerceTxPrDbContext>();

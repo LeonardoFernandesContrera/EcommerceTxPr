@@ -7,10 +7,13 @@ internal sealed class FakeOrderRepository : IOrderRepository
 {
     public Order? GetByIdResult { get; set; }
 
+    public List<Guid> GetByIdRequests { get; } = new();
+
     public List<Order> AddedOrders { get; } = new();
 
     public Task<Order?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
+        GetByIdRequests.Add(id);
         return Task.FromResult(GetByIdResult);
     }
 

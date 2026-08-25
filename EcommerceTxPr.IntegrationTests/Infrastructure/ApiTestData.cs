@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using EcommerceTxPr.Application.Customers.Contracts;
+using EcommerceTxPr.Application.Orders.Contracts;
 using EcommerceTxPr.Application.Products.Contracts;
 
 namespace EcommerceTxPr.IntegrationTests.Infrastructure;
@@ -38,5 +39,32 @@ internal static class ApiTestData
         var product = await response.Content.ReadFromJsonAsync<ProductResponse>();
         Assert.NotNull(product);
         return product;
+    }
+
+    public static async Task<HttpResponseMessage> PostOrderAsync(
+        HttpClient client,
+        CreateOrderRequest request,
+        string? idempotencyKey = "test-key",
+        IReadOnlyCollection<string>? headerValues = null)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
+        {
+            Content = JsonContent.Create(request)
+        };
+
+        if (headerValues is not null)
+        {
+            message.Headers.TryAddWithoutValidation(
+                "Idempotency-Key",
+                headerValues);
+        }
+        else if (idempotencyKey is not null)
+        {
+            message.Headers.TryAddWithoutValidation(
+                "Idempotency-Key",
+                idempotencyKey);
+        }
+
+        return await client.SendAsync(message);
     }
 }

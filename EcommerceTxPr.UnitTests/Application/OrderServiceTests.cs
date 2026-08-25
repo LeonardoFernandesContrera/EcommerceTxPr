@@ -2,6 +2,7 @@ using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Customers;
 using EcommerceTxPr.Application.Orders;
 using EcommerceTxPr.Application.Orders.Contracts;
+using EcommerceTxPr.Application.Orders.Idempotency;
 using EcommerceTxPr.Application.Orders.Services;
 using EcommerceTxPr.Application.Products;
 using EcommerceTxPr.Domain.Entities;
@@ -18,22 +19,237 @@ public sealed class OrderServiceTests
         var customer = new Customer("Customer", new DateTime(1990, 1, 1));
         var product = new Product("SKU-001", "Product", 10m, 5);
         var orderRepository = new FakeOrderRepository();
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
         var unitOfWork = new FakeUnitOfWork();
         var service = new OrderService(
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { product } },
             orderRepository,
+            idempotencyRepository,
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 2) });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.True(result.IsSuccess);
+        Assert.Equal(OrderCreationStatus.Created, result.Value?.Status);
+        Assert.Equal(3, product.StockQuantity);
+        var order = Assert.Single(orderRepository.AddedOrders);
+        var idempotencyRecord = Assert.Single(
+            idempotencyRepository.AddedRecords);
+        Assert.Equal(order.Id, idempotencyRecord.OrderId);
+        Assert.Equal(64, idempotencyRecord.KeyHash.Length);
+        Assert.Equal(64, idempotencyRecord.RequestHash.Length);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_same_key_and_request_replays_without_mutating_or_committing()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 5);
+        var customerRepository = new FakeCustomerRepository
+        {
+            GetByIdResult = customer
+        };
+        var productRepository = new FakeProductRepository
+        {
+            GetByIdsResult = new[] { product }
+        };
+        var orderRepository = new FakeOrderRepository();
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            customerRepository,
+            productRepository,
+            orderRepository,
+            idempotencyRepository,
+            unitOfWork);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        var created = await service.CreateAsync(
+            request,
+            "same-key",
+            CancellationToken.None);
+        var persistedOrder = Assert.Single(orderRepository.AddedOrders);
+        orderRepository.GetByIdResult = persistedOrder;
+        idempotencyRepository.EnqueueGetResult(
+            Assert.Single(idempotencyRepository.AddedRecords));
+
+        var replayed = await service.CreateAsync(
+            request,
+            "same-key",
+            CancellationToken.None);
+
+        Assert.True(created.IsSuccess);
+        Assert.True(replayed.IsSuccess);
+        Assert.Equal(OrderCreationStatus.Created, created.Value?.Status);
+        Assert.Equal(OrderCreationStatus.Replayed, replayed.Value?.Status);
+        Assert.Equal(created.Value?.Order.Id, replayed.Value?.Order.Id);
         Assert.Equal(3, product.StockQuantity);
         Assert.Single(orderRepository.AddedOrders);
+        Assert.Single(idempotencyRepository.AddedRecords);
+        Assert.Single(customerRepository.GetByIdRequests);
+        Assert.Single(productRepository.GetByIdsRequests);
         Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_same_key_and_different_request_returns_conflict_without_second_mutation()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 5);
+        var customerRepository = new FakeCustomerRepository
+        {
+            GetByIdResult = customer
+        };
+        var productRepository = new FakeProductRepository
+        {
+            GetByIdsResult = new[] { product }
+        };
+        var orderRepository = new FakeOrderRepository();
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            customerRepository,
+            productRepository,
+            orderRepository,
+            idempotencyRepository,
+            unitOfWork);
+        var firstRequest = ValidRequest(customer.Id, product.Id);
+
+        var created = await service.CreateAsync(
+            firstRequest,
+            "same-key",
+            CancellationToken.None);
+        idempotencyRepository.EnqueueGetResult(
+            Assert.Single(idempotencyRepository.AddedRecords));
+        var conflictingRequest = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        var conflict = await service.CreateAsync(
+            conflictingRequest,
+            "same-key",
+            CancellationToken.None);
+
+        Assert.True(created.IsSuccess);
+        Assert.False(conflict.IsSuccess);
+        Assert.Equal(OrderErrors.IdempotencyKeyConflict, conflict.Error);
+        Assert.Equal(4, product.StockQuantity);
+        Assert.Single(orderRepository.AddedOrders);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Theory]
+    [InlineData(SaveChangesResult.ConcurrencyConflict)]
+    [InlineData(SaveChangesResult.IdempotencyConflict)]
+    public async Task CreateAsync_commit_conflict_with_matching_winner_replays(
+        SaveChangesResult saveResult)
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var request = ValidRequest(customer.Id, product.Id);
+        var normalizedRequest = OrderRequestFingerprint.Create(request).Value!;
+        var key = OrderIdempotencyKey.Create("same-key").Value!;
+        var winningOrder = CreatePlacedOrder(customer.Id, product);
+        var winningRecord = new OrderIdempotencyRecord(
+            key.KeyHash,
+            normalizedRequest.RequestHash,
+            winningOrder.Id);
+        var orderRepository = new FakeOrderRepository
+        {
+            GetByIdResult = winningOrder
+        };
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        idempotencyRepository.EnqueueGetResult(null);
+        idempotencyRepository.EnqueueGetResult(winningRecord);
+        var unitOfWork = new FakeUnitOfWork { Result = saveResult };
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            orderRepository,
+            idempotencyRepository,
+            unitOfWork);
+
+        var result = await service.CreateAsync(
+            request,
+            "same-key",
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(OrderCreationStatus.Replayed, result.Value?.Status);
+        Assert.Equal(winningOrder.Id, result.Value?.Order.Id);
+        Assert.Single(orderRepository.AddedOrders);
+        Assert.Equal(new[] { winningOrder.Id }, orderRepository.GetByIdRequests);
+        Assert.Equal(2, idempotencyRepository.GetByKeyHashRequests.Count);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Theory]
+    [InlineData(SaveChangesResult.ConcurrencyConflict)]
+    [InlineData(SaveChangesResult.IdempotencyConflict)]
+    public async Task CreateAsync_commit_conflict_without_winner_returns_inventory_changed(
+        SaveChangesResult saveResult)
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        idempotencyRepository.EnqueueGetResult(null);
+        idempotencyRepository.EnqueueGetResult(null);
+        var unitOfWork = new FakeUnitOfWork { Result = saveResult };
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            new FakeOrderRepository(),
+            idempotencyRepository,
+            unitOfWork);
+
+        var result = await service.CreateAsync(
+            ValidRequest(customer.Id, product.Id),
+            "same-key",
+            CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(OrderErrors.InventoryChanged, result.Error);
+        Assert.Equal(2, idempotencyRepository.GetByKeyHashRequests.Count);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_invalid_key_returns_validation_before_any_repository_access()
+    {
+        var customerRepository = new FakeCustomerRepository();
+        var productRepository = new FakeProductRepository();
+        var orderRepository = new FakeOrderRepository();
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var service = new OrderService(
+            customerRepository,
+            productRepository,
+            orderRepository,
+            idempotencyRepository,
+            unitOfWork);
+
+        var result = await service.CreateAsync(
+            ValidRequest(Guid.NewGuid(), Guid.NewGuid()),
+            "   ",
+            CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(OrderErrors.IdempotencyKeyRequired, result.Error);
+        Assert.Empty(idempotencyRepository.GetByKeyHashRequests);
+        Assert.Empty(customerRepository.GetByIdRequests);
+        Assert.Empty(productRepository.GetByIdsRequests);
+        Assert.Empty(orderRepository.AddedOrders);
+        Assert.Equal(0, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
@@ -47,6 +263,7 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { product } },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
@@ -56,7 +273,10 @@ public sealed class OrderServiceTests
                 new CreateOrderItemRequest(product.Id, 3)
             });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, product.StockQuantity);
@@ -76,12 +296,16 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { product } },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 3) });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.InsufficientStock, result.Error);
@@ -111,6 +335,7 @@ public sealed class OrderServiceTests
             customerRepository,
             productRepository,
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
@@ -121,7 +346,10 @@ public sealed class OrderServiceTests
                 new CreateOrderItemRequest(secondProduct.Id, 1)
             });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         var order = Assert.Single(orderRepository.AddedOrders);
@@ -146,8 +374,8 @@ public sealed class OrderServiceTests
                 Assert.Equal(1, item.Quantity);
                 Assert.Equal(25m, item.LineTotal);
             });
-        Assert.Equal(order.Id, result.Value?.Id);
-        Assert.Equal(325m, result.Value?.Total);
+        Assert.Equal(order.Id, result.Value?.Order.Id);
+        Assert.Equal(325m, result.Value?.Order.Total);
         Assert.Equal(1, unitOfWork.SaveChangesCalls);
 
         var requestedIds = Assert.Single(productRepository.GetByIdsRequests);
@@ -167,10 +395,12 @@ public sealed class OrderServiceTests
             customerRepository,
             productRepository,
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
 
         var result = await service.CreateAsync(
             ValidRequest(Guid.Empty, Guid.NewGuid()),
+            "test-key",
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
@@ -196,10 +426,12 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository(),
             productRepository,
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
 
         var result = await service.CreateAsync(
             ValidRequest(Guid.NewGuid(), product.Id),
+            "test-key",
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
@@ -222,6 +454,7 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { existingProduct } },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
@@ -231,7 +464,10 @@ public sealed class OrderServiceTests
                 new CreateOrderItemRequest(missingProductId, 1)
             });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.NotFound, result.Error);
@@ -251,6 +487,7 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { product } },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
@@ -260,7 +497,10 @@ public sealed class OrderServiceTests
                 new CreateOrderItemRequest(product.Id, 3)
             });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.InsufficientStock, result.Error);
@@ -285,6 +525,7 @@ public sealed class OrderServiceTests
                 GetByIdsResult = new[] { availableProduct, unavailableProduct }
             },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             customer.Id,
@@ -294,7 +535,10 @@ public sealed class OrderServiceTests
                 new CreateOrderItemRequest(unavailableProduct.Id, 1)
             });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ProductErrors.InsufficientStock, result.Error);
@@ -318,10 +562,12 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository { GetByIdResult = customer },
             new FakeProductRepository { GetByIdsResult = new[] { product } },
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
 
         var result = await service.CreateAsync(
             ValidRequest(customer.Id, product.Id),
+            "test-key",
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
@@ -341,10 +587,12 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository(),
             new FakeProductRepository(),
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
 
         var result = await service.CreateAsync(
             new CreateOrderRequest(Guid.NewGuid(), Array.Empty<CreateOrderItemRequest>()),
+            "test-key",
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
@@ -362,12 +610,16 @@ public sealed class OrderServiceTests
             new FakeCustomerRepository(),
             new FakeProductRepository(),
             orderRepository,
+            new FakeOrderIdempotencyRepository(),
             unitOfWork);
         var request = new CreateOrderRequest(
             Guid.NewGuid(),
             new[] { new CreateOrderItemRequest(Guid.NewGuid(), 0) });
 
-        var result = await service.CreateAsync(request, CancellationToken.None);
+        var result = await service.CreateAsync(
+            request,
+            "test-key",
+            CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(OrderErrors.InvalidQuantity, result.Error);
@@ -380,5 +632,13 @@ public sealed class OrderServiceTests
         return new CreateOrderRequest(
             customerId,
             new[] { new CreateOrderItemRequest(productId, 1) });
+    }
+
+    private static Order CreatePlacedOrder(Guid customerId, Product product)
+    {
+        var order = new Order(customerId);
+        order.AddItem(product.Id, product.Name, product.Price, 1);
+        order.Place();
+        return order;
     }
 }

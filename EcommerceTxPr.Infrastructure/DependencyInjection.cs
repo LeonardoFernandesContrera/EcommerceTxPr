@@ -21,6 +21,12 @@ namespace EcommerceTxPr.Infrastructure
             services.AddScoped<ICustomerRepository, CustomerRepository>();
             services.AddScoped<IProductRepository, ProductRepository>();
             services.AddScoped<IOrderRepository, OrderRepository>();
+            services.AddScoped<
+                IOrderIdempotencyRepository,
+                OrderIdempotencyRepository>();
+            services.AddScoped<
+                IDatabaseErrorClassifier,
+                SqlServerDatabaseErrorClassifier>();
             services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
             return services;

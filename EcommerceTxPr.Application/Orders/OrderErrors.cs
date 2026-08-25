@@ -29,6 +29,26 @@ public static class OrderErrors
         "Order item quantity must be greater than zero.",
         ErrorType.Validation);
 
+    public static readonly Error IdempotencyKeyRequired = new(
+        "Order.IdempotencyKeyRequired",
+        "An Idempotency-Key header is required.",
+        ErrorType.Validation);
+
+    public static readonly Error IdempotencyKeyTooLong = new(
+        "Order.IdempotencyKeyTooLong",
+        "The Idempotency-Key header must not exceed 100 characters.",
+        ErrorType.Validation);
+
+    public static readonly Error IdempotencyKeyInvalid = new(
+        "Order.IdempotencyKeyInvalid",
+        "Exactly one Idempotency-Key header value must be supplied.",
+        ErrorType.Validation);
+
+    public static readonly Error IdempotencyKeyConflict = new(
+        "Order.IdempotencyKeyConflict",
+        "The Idempotency-Key has already been used for another order request.",
+        ErrorType.Conflict);
+
     public static readonly Error InventoryChanged = new(
         "Order.InventoryChanged",
         "Inventory changed while the order was being processed. Retry the operation.",

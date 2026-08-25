@@ -1,4 +1,5 @@
 using EcommerceApi.V2.ErrorHandling;
+using EcommerceTxPr.Application.Orders;
 using EcommerceTxPr.Application.Orders.Contracts;
 using EcommerceTxPr.Application.Orders.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -31,6 +32,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     }
 
     [HttpPost]
+    [ProducesResponseType<OrderResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<OrderResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -39,8 +41,18 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
         [FromBody] CreateOrderRequest request,
         CancellationToken cancellationToken)
     {
+        var keyValues = Request.Headers["Idempotency-Key"];
+
+        if (keyValues.Count > 1)
+        {
+            return this.ToProblemDetails(OrderErrors.IdempotencyKeyInvalid);
+        }
+
+        var idempotencyKey = keyValues.Count == 1
+            ? keyValues[0]
+            : null;
         var result = await _orderService
-            .CreateAsync(request, cancellationToken)
+            .CreateAsync(request, idempotencyKey, cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -48,11 +60,16 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
             return this.ToProblemDetails(result.Error!);
         }
 
-        var order = result.Value!;
+        var creation = result.Value!;
+
+        if (creation.Status == OrderCreationStatus.Replayed)
+        {
+            return Ok(creation.Order);
+        }
 
         return CreatedAtAction(
             nameof(GetById),
-            new { id = order.Id },
-            order);
+            new { id = creation.Order.Id },
+            creation.Order);
     }
 }

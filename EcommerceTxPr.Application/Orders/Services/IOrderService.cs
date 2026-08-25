@@ -9,7 +9,8 @@ public interface IOrderService
         Guid id,
         CancellationToken cancellationToken);
 
-    Task<Result<OrderResponse, Error>> CreateAsync(
+    Task<Result<OrderCreationResponse, Error>> CreateAsync(
         CreateOrderRequest request,
+        string? idempotencyKey,
         CancellationToken cancellationToken);
 }

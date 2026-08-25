@@ -1,5 +1,6 @@
 using System.Data.Common;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -65,6 +66,11 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
                 var connection = serviceProvider.GetRequiredService<DbConnection>();
                 options.UseSqlite(connection);
             });
+
+            services.RemoveAll<IDatabaseErrorClassifier>();
+            services.AddScoped<
+                IDatabaseErrorClassifier,
+                SqliteDatabaseErrorClassifier>();
 
             _configureTestServices?.Invoke(services);
         });

@@ -1,3 +1,4 @@
+using EcommerceTxPr.Application.Orders.Idempotency;
 using EcommerceTxPr.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,7 @@ namespace EcommerceTxPr.Infrastructure.Context
         public DbSet<Login> Logins { get; set; }
         public DbSet<Product> Products { get; set; }
         public DbSet<Order> Orders { get; set; }
+        public DbSet<OrderIdempotencyRecord> OrderIdempotencyRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

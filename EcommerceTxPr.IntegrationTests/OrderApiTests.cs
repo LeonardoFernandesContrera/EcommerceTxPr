@@ -36,7 +36,7 @@ public sealed class OrderApiTests
                 new CreateOrderItemRequest(secondProduct.Id, 3)
             });
 
-        using var postResponse = await client.PostAsJsonAsync("/api/orders", request);
+        using var postResponse = await ApiTestData.PostOrderAsync(client, request);
 
         Assert.Equal(HttpStatusCode.Created, postResponse.StatusCode);
         var created = await postResponse.Content.ReadFromJsonAsync<OrderResponse>();
@@ -67,6 +67,224 @@ public sealed class OrderApiTests
             item => AssertItem(item, secondProduct, 3, 75m));
     }
 
+    [Theory]
+    [InlineData(null, "Order.IdempotencyKeyRequired")]
+    [InlineData("", "Order.IdempotencyKeyRequired")]
+    [InlineData("   ", "Order.IdempotencyKeyRequired")]
+    public async Task Post_with_missing_or_blank_idempotency_key_returns_bad_request(
+        string? idempotencyKey,
+        string expectedCode)
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var request = new CreateOrderRequest(
+            Guid.NewGuid(),
+            new[] { new CreateOrderItemRequest(Guid.NewGuid(), 1) });
+
+        using var response = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            idempotencyKey);
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.BadRequest,
+            expectedCode);
+        await AssertPersistenceCountsAsync(factory, 0, 0);
+    }
+
+    [Fact]
+    public async Task Post_with_oversized_idempotency_key_returns_bad_request()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var request = new CreateOrderRequest(
+            Guid.NewGuid(),
+            new[] { new CreateOrderItemRequest(Guid.NewGuid(), 1) });
+
+        using var response = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            new string('a', 101));
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.BadRequest,
+            "Order.IdempotencyKeyTooLong");
+        await AssertPersistenceCountsAsync(factory, 0, 0);
+    }
+
+    [Fact]
+    public async Task Post_with_multiple_idempotency_keys_returns_bad_request()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var request = new CreateOrderRequest(
+            Guid.NewGuid(),
+            new[] { new CreateOrderItemRequest(Guid.NewGuid(), 1) });
+
+        using var response = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            headerValues: new[] { "first", "second" });
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.BadRequest,
+            "Order.IdempotencyKeyInvalid");
+        await AssertPersistenceCountsAsync(factory, 0, 0);
+    }
+
+    [Fact]
+    public async Task Post_same_key_and_request_returns_created_then_replayed_once()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 5);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 2) });
+
+        using var firstResponse = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            "replay-key");
+        using var secondResponse = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            "replay-key");
+
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        var created = await firstResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        var replayed = await secondResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(created);
+        Assert.Equal(created, replayed);
+        using var productResponse = await client.GetAsync(
+            $"/api/products/{product.Id}");
+        var persistedProduct = await productResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        Assert.NotNull(persistedProduct);
+        Assert.Equal(3, persistedProduct.StockQuantity);
+        await AssertPersistenceCountsAsync(factory, 1, 1);
+    }
+
+    [Fact]
+    public async Task Post_same_key_and_different_request_returns_conflict_without_second_change()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 5);
+
+        using var firstResponse = await ApiTestData.PostOrderAsync(
+            client,
+            new CreateOrderRequest(
+                customer.Id,
+                new[] { new CreateOrderItemRequest(product.Id, 1) }),
+            "conflict-key");
+        using var conflictResponse = await ApiTestData.PostOrderAsync(
+            client,
+            new CreateOrderRequest(
+                customer.Id,
+                new[] { new CreateOrderItemRequest(product.Id, 2) }),
+            "conflict-key");
+
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            conflictResponse,
+            HttpStatusCode.Conflict,
+            "Order.IdempotencyKeyConflict");
+        using var productResponse = await client.GetAsync(
+            $"/api/products/{product.Id}");
+        var persistedProduct = await productResponse.Content
+            .ReadFromJsonAsync<ProductResponse>();
+        Assert.NotNull(persistedProduct);
+        Assert.Equal(4, persistedProduct.StockQuantity);
+        await AssertPersistenceCountsAsync(factory, 1, 1);
+    }
+
+    [Fact]
+    public async Task Post_same_key_replays_when_items_are_reordered_and_split()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var firstProduct = await ApiTestData.CreateProductAsync(
+            client,
+            "SKU-ONE",
+            stockQuantity: 10);
+        var secondProduct = await ApiTestData.CreateProductAsync(
+            client,
+            "SKU-TWO",
+            stockQuantity: 10);
+        var splitRequest = new CreateOrderRequest(
+            customer.Id,
+            new[]
+            {
+                new CreateOrderItemRequest(secondProduct.Id, 1),
+                new CreateOrderItemRequest(firstProduct.Id, 2),
+                new CreateOrderItemRequest(firstProduct.Id, 3)
+            });
+        var aggregatedRequest = new CreateOrderRequest(
+            customer.Id,
+            new[]
+            {
+                new CreateOrderItemRequest(firstProduct.Id, 5),
+                new CreateOrderItemRequest(secondProduct.Id, 1)
+            });
+
+        using var firstResponse = await ApiTestData.PostOrderAsync(
+            client,
+            splitRequest,
+            "normalized-key");
+        using var replayResponse = await ApiTestData.PostOrderAsync(
+            client,
+            aggregatedRequest,
+            "normalized-key");
+
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        await AssertPersistenceCountsAsync(factory, 1, 1);
+    }
+
+    [Fact]
+    public async Task Post_keys_use_exact_case_sensitive_semantics_across_test_provider()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(
+            client,
+            stockQuantity: 2);
+        var request = new CreateOrderRequest(
+            customer.Id,
+            new[] { new CreateOrderItemRequest(product.Id, 1) });
+
+        using var upperResponse = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            "CASE-KEY");
+        using var lowerResponse = await ApiTestData.PostOrderAsync(
+            client,
+            request,
+            "case-key");
+
+        Assert.Equal(HttpStatusCode.Created, upperResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, lowerResponse.StatusCode);
+        var upperOrder = await upperResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        var lowerOrder = await lowerResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(upperOrder);
+        Assert.NotNull(lowerOrder);
+        Assert.NotEqual(upperOrder.Id, lowerOrder.Id);
+        await AssertPersistenceCountsAsync(factory, 2, 2);
+    }
+
     [Fact]
     public async Task Post_with_unknown_customer_returns_not_found()
     {
@@ -77,7 +295,7 @@ public sealed class OrderApiTests
             Guid.NewGuid(),
             new[] { new CreateOrderItemRequest(product.Id, 1) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -95,7 +313,7 @@ public sealed class OrderApiTests
             Guid.Empty,
             new[] { new CreateOrderItemRequest(product.Id, 1) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -113,7 +331,7 @@ public sealed class OrderApiTests
             customer.Id,
             new[] { new CreateOrderItemRequest(Guid.NewGuid(), 1) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -135,7 +353,7 @@ public sealed class OrderApiTests
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 1) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -152,7 +370,7 @@ public sealed class OrderApiTests
             Guid.NewGuid(),
             Array.Empty<CreateOrderItemRequest>());
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertValidationProblemDetailsAsync(response);
     }
@@ -166,7 +384,7 @@ public sealed class OrderApiTests
             Guid.NewGuid(),
             new[] { new CreateOrderItemRequest(Guid.NewGuid(), 0) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertValidationProblemDetailsAsync(response);
     }
@@ -197,7 +415,7 @@ public sealed class OrderApiTests
         var request = new CreateOrderRequest(
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 2) });
-        using var postResponse = await client.PostAsJsonAsync("/api/orders", request);
+        using var postResponse = await ApiTestData.PostOrderAsync(client, request);
         Assert.Equal(HttpStatusCode.Created, postResponse.StatusCode);
         var createdOrder = await postResponse.Content.ReadFromJsonAsync<OrderResponse>();
         Assert.NotNull(createdOrder);
@@ -233,7 +451,7 @@ public sealed class OrderApiTests
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 2) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         using var productResponse = await client.GetAsync($"/api/products/{product.Id}");
@@ -257,7 +475,7 @@ public sealed class OrderApiTests
             customer.Id,
             new[] { new CreateOrderItemRequest(product.Id, 2) });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -268,7 +486,7 @@ public sealed class OrderApiTests
             .ReadFromJsonAsync<ProductResponse>();
         Assert.NotNull(unchangedProduct);
         Assert.Equal(1, unchangedProduct.StockQuantity);
-        await AssertOrderCountAsync(factory, 0);
+        await AssertPersistenceCountsAsync(factory, 0, 0);
     }
 
     [Fact]
@@ -297,7 +515,7 @@ public sealed class OrderApiTests
                 new CreateOrderItemRequest(unavailableProduct.Id, 1)
             });
 
-        using var response = await client.PostAsJsonAsync("/api/orders", request);
+        using var response = await ApiTestData.PostOrderAsync(client, request);
 
         await ApiTestAssertions.AssertProblemDetailsAsync(
             response,
@@ -315,7 +533,7 @@ public sealed class OrderApiTests
         Assert.NotNull(returnedUnavailable);
         Assert.Equal(5, returnedAvailable.StockQuantity);
         Assert.Equal(0, returnedUnavailable.StockQuantity);
-        await AssertOrderCountAsync(factory, 0);
+        await AssertPersistenceCountsAsync(factory, 0, 0);
     }
 
     private static void AssertItem(
@@ -331,13 +549,17 @@ public sealed class OrderApiTests
         Assert.Equal(expectedLineTotal, item.LineTotal);
     }
 
-    private static async Task AssertOrderCountAsync(
+    private static async Task AssertPersistenceCountsAsync(
         CustomerApiFactory factory,
-        int expectedCount)
+        int expectedOrderCount,
+        int expectedIdempotencyRecordCount)
     {
         using var scope = factory.Services.CreateScope();
         var context = scope.ServiceProvider
             .GetRequiredService<EcommerceTxPrDbContext>();
-        Assert.Equal(expectedCount, await context.Orders.CountAsync());
+        Assert.Equal(expectedOrderCount, await context.Orders.CountAsync());
+        Assert.Equal(
+            expectedIdempotencyRecordCount,
+            await context.OrderIdempotencyRecords.CountAsync());
     }
 }
