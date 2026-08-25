@@ -159,6 +159,14 @@ public sealed class OrderService : IOrderService
             .SaveChangesAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        if (saveResult == SaveChangesResult.Success)
+        {
+            return Result<OrderCreationResponse, Error>.Success(
+                new OrderCreationResponse(
+                    ToResponse(order),
+                    OrderCreationStatus.Created));
+        }
+
         if (saveResult is SaveChangesResult.ConcurrencyConflict
             or SaveChangesResult.IdempotencyConflict)
         {
@@ -179,10 +187,8 @@ public sealed class OrderService : IOrderService
                 .ConfigureAwait(false);
         }
 
-        return Result<OrderCreationResponse, Error>.Success(
-            new OrderCreationResponse(
-                ToResponse(order),
-                OrderCreationStatus.Created));
+        throw new InvalidOperationException(
+            $"Unsupported save result: {saveResult}.");
     }
 
     private async Task<Result<OrderCreationResponse, Error>> ReconcileAsync(
@@ -203,12 +209,16 @@ public sealed class OrderService : IOrderService
             .GetByIdAsync(record.OrderId, cancellationToken)
             .ConfigureAwait(false);
 
-        return order is null
-            ? Result<OrderCreationResponse, Error>.Failure(OrderErrors.NotFound)
-            : Result<OrderCreationResponse, Error>.Success(
-                new OrderCreationResponse(
-                    ToResponse(order),
-                    OrderCreationStatus.Replayed));
+        if (order is null)
+        {
+            throw new InvalidOperationException(
+                "An order idempotency record references a missing order.");
+        }
+
+        return Result<OrderCreationResponse, Error>.Success(
+            new OrderCreationResponse(
+                ToResponse(order),
+                OrderCreationStatus.Replayed));
     }
 
     private async Task<Result<OrderCreationResponse, Error>> ReconcileOrFailAsync(
@@ -233,6 +243,9 @@ public sealed class OrderService : IOrderService
     private static OrderResponse ToResponse(Order order)
     {
         IReadOnlyCollection<OrderItemResponse> items = order.Items
+            .OrderBy(
+                item => item.ProductId.ToString("N"),
+                StringComparer.Ordinal)
             .Select(item => new OrderItemResponse(
                 item.ProductId,
                 item.ProductName,
@@ -245,8 +258,15 @@ public sealed class OrderService : IOrderService
             order.Id,
             order.CustomerId,
             order.Status,
-            order.CreationDate,
+            EnsureUtc(order.CreationDate),
             order.Total,
             items);
+    }
+
+    private static DateTime EnsureUtc(DateTime value)
+    {
+        return value.Kind == DateTimeKind.Utc
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
     }
 }

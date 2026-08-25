@@ -130,6 +130,27 @@ public sealed class ProductServiceTests
     }
 
     [Fact]
+    public async Task UpdateAsync_unknown_save_result_fails_closed()
+    {
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = (SaveChangesResult)999
+        };
+        var service = new ProductService(
+            new FakeProductRepository { GetByIdResult = product },
+            unitOfWork);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.UpdateAsync(
+                product.Id,
+                new UpdateProductRequest("Updated", 20m),
+                CancellationToken.None));
+
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
     public async Task DeleteAsync_existing_product_deactivates_and_commits_once()
     {
         var product = new Product("SKU-001", "Product", 10m, 1);

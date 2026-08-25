@@ -14,6 +14,34 @@ namespace EcommerceTxPr.UnitTests.Application;
 public sealed class OrderServiceTests
 {
     [Fact]
+    public async Task GetByIdAsync_returns_items_in_deterministic_product_order()
+    {
+        var lowerProductId = Guid.Parse(
+            "11111111-1111-1111-1111-111111111111");
+        var higherProductId = Guid.Parse(
+            "99999999-9999-9999-9999-999999999999");
+        var order = new Order(Guid.NewGuid());
+        order.AddItem(higherProductId, "Higher", 10m, 1);
+        order.AddItem(lowerProductId, "Lower", 10m, 1);
+        order.Place();
+        var service = new OrderService(
+            new FakeCustomerRepository(),
+            new FakeProductRepository(),
+            new FakeOrderRepository { GetByIdResult = order },
+            new FakeOrderIdempotencyRepository(),
+            new FakeUnitOfWork());
+
+        var result = await service.GetByIdAsync(
+            order.Id,
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            new[] { lowerProductId, higherProductId },
+            result.Value!.Items.Select(item => item.ProductId));
+    }
+
+    [Fact]
     public async Task CreateAsync_consumes_stock_stages_order_and_commits_once()
     {
         var customer = new Customer("Customer", new DateTime(1990, 1, 1));
@@ -265,6 +293,63 @@ public sealed class OrderServiceTests
         Assert.Empty(orderRepository.AddedOrders);
         Assert.Equal(2, idempotencyRepository.GetByKeyHashRequests.Count);
         Assert.Equal(0, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_unknown_save_result_fails_closed()
+    {
+        var customer = new Customer("Customer", new DateTime(1990, 1, 1));
+        var product = new Product("SKU-001", "Product", 10m, 1);
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = (SaveChangesResult)999
+        };
+        var service = new OrderService(
+            new FakeCustomerRepository { GetByIdResult = customer },
+            new FakeProductRepository { GetByIdsResult = new[] { product } },
+            new FakeOrderRepository(),
+            new FakeOrderIdempotencyRepository(),
+            unitOfWork);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.CreateAsync(
+                ValidRequest(customer.Id, product.Id),
+                "test-key",
+                CancellationToken.None));
+
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task CreateAsync_matching_record_without_order_fails_invariant()
+    {
+        var customerId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var request = ValidRequest(customerId, productId);
+        var requestHash = OrderRequestFingerprint.Create(request)
+            .Value!
+            .RequestHash;
+        var keyHash = OrderIdempotencyKey.Create("test-key")
+            .Value!
+            .KeyHash;
+        var idempotencyRepository = new FakeOrderIdempotencyRepository();
+        idempotencyRepository.EnqueueGetResult(
+            new OrderIdempotencyRecord(
+                keyHash,
+                requestHash,
+                Guid.NewGuid()));
+        var service = new OrderService(
+            new FakeCustomerRepository(),
+            new FakeProductRepository(),
+            new FakeOrderRepository(),
+            idempotencyRepository,
+            new FakeUnitOfWork());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.CreateAsync(
+                request,
+                "test-key",
+                CancellationToken.None));
     }
 
     [Fact]

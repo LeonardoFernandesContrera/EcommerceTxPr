@@ -78,6 +78,8 @@ public sealed class ProductService : IProductService
                 ProductErrors.ConcurrentModification);
         }
 
+        EnsureSuccessfulSave(saveResult);
+
         return Result<ProductResponse, Error>.Success(ToResponse(product));
     }
 
@@ -107,6 +109,8 @@ public sealed class ProductService : IProductService
                 ProductErrors.ConcurrentModification);
         }
 
+        EnsureSuccessfulSave(saveResult);
+
         return Result<ProductResponse, Error>.Success(ToResponse(product));
     }
 
@@ -135,7 +139,18 @@ public sealed class ProductService : IProductService
                 ProductErrors.ConcurrentModification);
         }
 
+        EnsureSuccessfulSave(saveResult);
+
         return Result<Guid, Error>.Success(product.Id);
+    }
+
+    private static void EnsureSuccessfulSave(SaveChangesResult saveResult)
+    {
+        if (saveResult != SaveChangesResult.Success)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported save result: {saveResult}.");
+        }
     }
 
     private static ProductResponse ToResponse(Product product)

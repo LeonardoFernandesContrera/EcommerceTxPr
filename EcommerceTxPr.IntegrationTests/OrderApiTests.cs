@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using EcommerceTxPr.Application.Orders.Contracts;
 using EcommerceTxPr.Application.Products.Contracts;
 using EcommerceTxPr.Domain.Enums;
 using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ApiExplorer;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +17,28 @@ namespace EcommerceTxPr.IntegrationTests;
 
 public sealed class OrderApiTests
 {
+    [Fact]
+    public void Post_api_description_declares_idempotency_header_and_problem_details()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var descriptions = factory.Services
+            .GetRequiredService<IApiDescriptionGroupCollectionProvider>()
+            .ApiDescriptionGroups
+            .Items
+            .SelectMany(group => group.Items);
+        var postOrder = Assert.Single(descriptions.Where(description =>
+            description.HttpMethod == HttpMethod.Post.Method
+            && description.RelativePath == "api/orders"));
+
+        var header = Assert.Single(postOrder.ParameterDescriptions.Where(
+            parameter => parameter.Name == "Idempotency-Key"));
+        Assert.Equal(BindingSource.Header, header.Source);
+        var badRequest = Assert.Single(postOrder.SupportedResponseTypes.Where(
+            response => response.StatusCode == StatusCodes.Status400BadRequest));
+        Assert.Equal(typeof(ProblemDetails), badRequest.Type);
+    }
+
     [Fact]
     public async Task Post_then_get_returns_customer_items_and_calculated_totals()
     {
@@ -159,6 +186,17 @@ public sealed class OrderApiTests
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        var createdJson = await firstResponse.Content.ReadAsStringAsync();
+        var replayedJson = await secondResponse.Content.ReadAsStringAsync();
+        using var createdDocument = JsonDocument.Parse(createdJson);
+        using var replayedDocument = JsonDocument.Parse(replayedJson);
+        Assert.Equal(
+            createdDocument.RootElement
+                .GetProperty("creationDate")
+                .GetString(),
+            replayedDocument.RootElement
+                .GetProperty("creationDate")
+                .GetString());
         var created = await firstResponse.Content.ReadFromJsonAsync<OrderResponse>();
         var replayed = await secondResponse.Content.ReadFromJsonAsync<OrderResponse>();
         Assert.NotNull(created);
@@ -256,6 +294,12 @@ public sealed class OrderApiTests
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var created = await firstResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        var replayed = await replayResponse.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(created);
+        Assert.NotNull(replayed);
+        Assert.Equal(created.Id, replayed.Id);
+        Assert.Equal(created.Items.ToArray(), replayed.Items.ToArray());
         await AssertPersistenceCountsAsync(factory, 1, 1);
     }
 

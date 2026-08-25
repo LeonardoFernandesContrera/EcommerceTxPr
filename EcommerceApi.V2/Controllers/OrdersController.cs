@@ -10,6 +10,8 @@ namespace EcommerceApi.V2.Controllers;
 [Route("api/orders")]
 public sealed class OrdersController(IOrderService orderService) : ControllerBase
 {
+    private const string IdempotencyKeyHeader = "Idempotency-Key";
+
     private readonly IOrderService _orderService = orderService;
 
     [HttpGet("{id:guid}")]
@@ -34,23 +36,21 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     [HttpPost]
     [ProducesResponseType<OrderResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<OrderResponse>(StatusCodes.Status201Created)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<OrderResponse>> Create(
         [FromBody] CreateOrderRequest request,
+        [FromHeader(Name = IdempotencyKeyHeader)] string? idempotencyKey,
         CancellationToken cancellationToken)
     {
-        var keyValues = Request.Headers["Idempotency-Key"];
+        var keyValues = Request.Headers[IdempotencyKeyHeader];
 
         if (keyValues.Count > 1)
         {
             return this.ToProblemDetails(OrderErrors.IdempotencyKeyInvalid);
         }
 
-        var idempotencyKey = keyValues.Count == 1
-            ? keyValues[0]
-            : null;
         var result = await _orderService
             .CreateAsync(request, idempotencyKey, cancellationToken)
             .ConfigureAwait(false);
@@ -65,6 +65,12 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
         if (creation.Status == OrderCreationStatus.Replayed)
         {
             return Ok(creation.Order);
+        }
+
+        if (creation.Status != OrderCreationStatus.Created)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported order creation status: {creation.Status}.");
         }
 
         return CreatedAtAction(
