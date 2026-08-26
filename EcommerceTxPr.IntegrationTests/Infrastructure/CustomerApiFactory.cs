@@ -19,6 +19,7 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
         "Server=test-only;Database=test-only;User Id=test-only;Password=test-only";
 
     private readonly Action<IServiceCollection>? _configureTestServices;
+    private readonly IReadOnlyDictionary<string, string?>? _configurationValues;
 
     static CustomerApiFactory()
     {
@@ -28,9 +29,11 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
     }
 
     public CustomerApiFactory(
-        Action<IServiceCollection>? configureTestServices = null)
+        Action<IServiceCollection>? configureTestServices = null,
+        IReadOnlyDictionary<string, string?>? configurationValues = null)
     {
         _configureTestServices = configureTestServices;
+        _configurationValues = configurationValues;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -48,6 +51,11 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
                 {
                     ["ConnectionStrings:DefaultConnection"] = TestConnectionString
                 });
+
+            if (_configurationValues is not null)
+            {
+                configuration.AddInMemoryCollection(_configurationValues);
+            }
         });
 
         builder.ConfigureServices(services =>

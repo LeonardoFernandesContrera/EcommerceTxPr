@@ -6,9 +6,6 @@ namespace EcommerceTxPr.Infrastructure.Outbox;
 
 public static class DomainEventOutboxMapper
 {
-    private const string PaymentSucceededType = "payment.succeeded.v1";
-    private const string PaymentFailedType = "payment.failed.v1";
-
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -39,7 +36,7 @@ public static class DomainEventOutboxMapper
             domainEvent.OccurredOnUtc);
 
         return new OutboxMessage(
-            PaymentSucceededType,
+            OutboxMessageTypes.PaymentSucceededV1,
             JsonSerializer.Serialize(payload, SerializerOptions),
             domainEvent.OccurredOnUtc);
     }
@@ -55,7 +52,7 @@ public static class DomainEventOutboxMapper
             domainEvent.OccurredOnUtc);
 
         return new OutboxMessage(
-            PaymentFailedType,
+            OutboxMessageTypes.PaymentFailedV1,
             JsonSerializer.Serialize(payload, SerializerOptions),
             domainEvent.OccurredOnUtc);
     }

@@ -33,7 +33,7 @@ public sealed class DomainEventOutboxMapperTests
 
         var message = DomainEventOutboxMapper.Map(domainEvent);
 
-        Assert.Equal("payment.succeeded.v1", message.Type);
+        Assert.Equal(OutboxMessageTypes.PaymentSucceededV1, message.Type);
         Assert.Equal(OccurredOnUtc, message.OccurredOnUtc);
         using var document = JsonDocument.Parse(message.Payload);
         var payload = document.RootElement;
@@ -70,7 +70,7 @@ public sealed class DomainEventOutboxMapperTests
 
         var message = DomainEventOutboxMapper.Map(domainEvent);
 
-        Assert.Equal("payment.failed.v1", message.Type);
+        Assert.Equal(OutboxMessageTypes.PaymentFailedV1, message.Type);
         Assert.Equal(OccurredOnUtc, message.OccurredOnUtc);
         using var document = JsonDocument.Parse(message.Payload);
         var payload = document.RootElement;

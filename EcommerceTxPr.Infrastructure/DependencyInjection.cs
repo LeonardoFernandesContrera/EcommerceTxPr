@@ -5,12 +5,15 @@ using EcommerceTxPr.Application.Payments.Gateways;
 using EcommerceTxPr.Application.Payments.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Outbox;
 using EcommerceTxPr.Infrastructure.Persistence;
 using EcommerceTxPr.Infrastructure.Payments;
+using EcommerceTxPr.Infrastructure.RabbitMq;
 using EcommerceTxPr.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace EcommerceTxPr.Infrastructure
 {
@@ -52,6 +55,37 @@ namespace EcommerceTxPr.Infrastructure
             services.AddScoped<
                 IPaymentGateway,
                 SimulatedDevelopmentPaymentGateway>();
+
+            return services;
+        }
+
+        public static IServiceCollection AddRabbitMqOutboxDispatcher(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            var section = configuration.GetSection(RabbitMqOptions.SectionName);
+
+            services
+                .AddOptions<RabbitMqOptions>()
+                .Bind(section)
+                .ValidateOnStart();
+            services.AddSingleton<
+                IValidateOptions<RabbitMqOptions>,
+                RabbitMqOptionsValidator>();
+
+            if (!section.GetValue<bool>(nameof(RabbitMqOptions.Enabled)))
+            {
+                return services;
+            }
+
+            services.AddSingleton<
+                IRabbitMqPublisherSessionFactory,
+                RabbitMqPublisherSessionFactory>();
+            services.AddSingleton<
+                IOutboxMessagePublisher,
+                RabbitMqOutboxMessagePublisher>();
+            services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
+            services.AddHostedService<OutboxDispatcherBackgroundService>();
 
             return services;
         }

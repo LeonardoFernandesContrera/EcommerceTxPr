@@ -27,7 +27,7 @@ public sealed class OutboxMessageConfiguration
             .IsRequired();
 
         builder.Property(message => message.Error)
-            .HasMaxLength(2000);
+            .HasMaxLength(OutboxMessage.MaxErrorLength);
 
         builder.HasIndex(message => message.ProcessedOnUtc);
     }

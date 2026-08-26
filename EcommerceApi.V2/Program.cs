@@ -13,6 +13,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddRabbitMqOutboxDispatcher(builder.Configuration);
 
 if (builder.Environment.IsDevelopment())
 {
