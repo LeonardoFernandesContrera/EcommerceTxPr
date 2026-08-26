@@ -1,5 +1,6 @@
 using EcommerceTxPr.Application.Orders.Idempotency;
 using EcommerceTxPr.Domain.Entities;
+using EcommerceTxPr.Infrastructure.Inbox;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,6 +25,16 @@ public sealed class SqlServerDatabaseErrorClassifier
             entry => entry.Entity is Payment);
 
         return hasPaymentEntry
+            && exception.InnerException is SqlException sqlException
+            && sqlException.Number is 2601 or 2627;
+    }
+
+    public bool IsInboxConflict(DbUpdateException exception)
+    {
+        var hasInboxEntry = exception.Entries.Any(
+            entry => entry.Entity is InboxMessage);
+
+        return hasInboxEntry
             && exception.InnerException is SqlException sqlException
             && sqlException.Number is 2601 or 2627;
     }

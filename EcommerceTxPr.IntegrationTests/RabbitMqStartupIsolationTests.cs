@@ -1,6 +1,7 @@
 using System.Net;
 using EcommerceTxPr.Infrastructure;
 using EcommerceTxPr.Infrastructure.Outbox;
+using EcommerceTxPr.Infrastructure.Inbox;
 using EcommerceTxPr.Infrastructure.RabbitMq;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +15,7 @@ namespace EcommerceTxPr.IntegrationTests;
 public sealed class RabbitMqStartupIsolationTests
 {
     [Fact]
-    public void Disabled_configuration_registers_no_publisher_or_dispatcher_worker()
+    public void Disabled_configuration_registers_no_rabbitmq_worker()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -36,6 +37,18 @@ public sealed class RabbitMqStartupIsolationTests
             services,
             descriptor => descriptor.ImplementationType
                 == typeof(OutboxDispatcherBackgroundService));
+        Assert.DoesNotContain(
+            services,
+            descriptor => descriptor.ServiceType
+                == typeof(IPaymentIntegrationEventProcessor));
+        Assert.DoesNotContain(
+            services,
+            descriptor => descriptor.ServiceType
+                == typeof(IRabbitMqPaymentEventsConsumerSessionFactory));
+        Assert.DoesNotContain(
+            services,
+            descriptor => descriptor.ImplementationType
+                == typeof(PaymentEventsConsumerBackgroundService));
     }
 
     [Fact]
@@ -85,7 +98,9 @@ public sealed class RabbitMqStartupIsolationTests
             ["RabbitMq:ExchangeName"] = "ecommerce.events",
             ["RabbitMq:PaymentEventsQueueName"] = "ecommerce.payment-events",
             ["RabbitMq:BatchSize"] = batchSize.ToString(),
-            ["RabbitMq:PollingIntervalSeconds"] = "60"
+            ["RabbitMq:PollingIntervalSeconds"] = "60",
+            ["RabbitMq:PrefetchCount"] = "1",
+            ["RabbitMq:ConsumerReconnectDelaySeconds"] = "60"
         };
     }
 }

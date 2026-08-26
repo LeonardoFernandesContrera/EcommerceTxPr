@@ -5,6 +5,7 @@ using EcommerceTxPr.Application.Payments.Gateways;
 using EcommerceTxPr.Application.Payments.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Inbox;
 using EcommerceTxPr.Infrastructure.Outbox;
 using EcommerceTxPr.Infrastructure.Persistence;
 using EcommerceTxPr.Infrastructure.Payments;
@@ -86,6 +87,16 @@ namespace EcommerceTxPr.Infrastructure
                 RabbitMqOutboxMessagePublisher>();
             services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
             services.AddHostedService<OutboxDispatcherBackgroundService>();
+            services.AddScoped<
+                IPaymentIntegrationEventProcessor,
+                PaymentIntegrationEventProcessor>();
+            services.AddSingleton<
+                IPaymentEventDeliveryHandler,
+                PaymentEventDeliveryHandler>();
+            services.AddSingleton<
+                IRabbitMqPaymentEventsConsumerSessionFactory,
+                RabbitMqPaymentEventsConsumerSessionFactory>();
+            services.AddHostedService<PaymentEventsConsumerBackgroundService>();
 
             return services;
         }

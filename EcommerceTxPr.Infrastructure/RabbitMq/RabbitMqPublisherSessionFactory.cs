@@ -1,4 +1,3 @@
-using EcommerceTxPr.Infrastructure.Outbox;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
@@ -9,13 +8,6 @@ internal sealed class RabbitMqPublisherSessionFactory
 {
     private const string ConnectionName = "EcommerceTxPr.OutboxPublisher";
 
-    private static readonly IReadOnlyList<string> SupportedRoutingKeys =
-        Array.AsReadOnly(new[]
-        {
-            OutboxMessageTypes.PaymentSucceededV1,
-            OutboxMessageTypes.PaymentFailedV1
-        });
-
     private readonly RabbitMqOptions _options;
 
     public RabbitMqPublisherSessionFactory(IOptions<RabbitMqOptions> options)
@@ -23,7 +15,8 @@ internal sealed class RabbitMqPublisherSessionFactory
         _options = options.Value;
     }
 
-    internal static IReadOnlyList<string> RoutingKeys => SupportedRoutingKeys;
+    internal static IReadOnlyList<string> RoutingKeys =>
+        RabbitMqTopology.RoutingKeys;
 
     public async Task<IRabbitMqPublisherSession> CreateAsync(
         CancellationToken cancellationToken)
@@ -70,7 +63,8 @@ internal sealed class RabbitMqPublisherSessionFactory
 
         try
         {
-            await DeclareTopologyAsync(channel, cancellationToken)
+            await RabbitMqTopology
+                .DeclareAsync(channel, _options, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -112,37 +106,6 @@ internal sealed class RabbitMqPublisherSessionFactory
         return new CreateChannelOptions(
             publisherConfirmationsEnabled: true,
             publisherConfirmationTrackingEnabled: true);
-    }
-
-    private async Task DeclareTopologyAsync(
-        IChannel channel,
-        CancellationToken cancellationToken)
-    {
-        await channel.ExchangeDeclareAsync(
-                _options.ExchangeName,
-                ExchangeType.Topic,
-                durable: true,
-                autoDelete: false,
-                cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        await channel.QueueDeclareAsync(
-                _options.PaymentEventsQueueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var routingKey in SupportedRoutingKeys)
-        {
-            await channel.QueueBindAsync(
-                    _options.PaymentEventsQueueName,
-                    _options.ExchangeName,
-                    routingKey,
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-        }
     }
 
     private static async ValueTask SafeDisposeAsync(IAsyncDisposable value)

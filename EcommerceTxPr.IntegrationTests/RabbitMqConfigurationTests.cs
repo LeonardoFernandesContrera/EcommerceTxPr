@@ -22,6 +22,15 @@ public sealed class RabbitMqConfigurationTests
         Assert.True(result.Succeeded);
     }
 
+    [Fact]
+    public void Consumer_defaults_are_sequential_and_use_bounded_reconnect_delay()
+    {
+        var options = new RabbitMqOptions();
+
+        Assert.Equal((ushort)1, options.PrefetchCount);
+        Assert.Equal(5, options.ConsumerReconnectDelaySeconds);
+    }
+
     [Theory]
     [InlineData("HostName")]
     [InlineData("UserName")]
@@ -88,6 +97,40 @@ public sealed class RabbitMqConfigurationTests
             failure => failure.Contains("PollingIntervalSeconds"));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public void Enabled_configuration_rejects_invalid_prefetch_count(
+        ushort prefetchCount)
+    {
+        var options = CreateValidOptions();
+        options.PrefetchCount = prefetchCount;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("PrefetchCount"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3601)]
+    public void Enabled_configuration_rejects_invalid_consumer_reconnect_delay(
+        int reconnectDelaySeconds)
+    {
+        var options = CreateValidOptions();
+        options.ConsumerReconnectDelaySeconds = reconnectDelaySeconds;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("ConsumerReconnectDelaySeconds"));
+    }
+
     private static RabbitMqOptions CreateValidOptions()
     {
         return new RabbitMqOptions
@@ -101,7 +144,9 @@ public sealed class RabbitMqConfigurationTests
             ExchangeName = "ecommerce.events",
             PaymentEventsQueueName = "ecommerce.payment-events",
             BatchSize = 20,
-            PollingIntervalSeconds = 5
+            PollingIntervalSeconds = 5,
+            PrefetchCount = 1,
+            ConsumerReconnectDelaySeconds = 5
         };
     }
 

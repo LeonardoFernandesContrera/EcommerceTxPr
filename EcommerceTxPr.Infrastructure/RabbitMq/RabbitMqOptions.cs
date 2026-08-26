@@ -24,4 +24,8 @@ public sealed class RabbitMqOptions
     public int BatchSize { get; set; } = 20;
 
     public int PollingIntervalSeconds { get; set; } = 5;
+
+    public ushort PrefetchCount { get; set; } = 1;
+
+    public int ConsumerReconnectDelaySeconds { get; set; } = 5;
 }

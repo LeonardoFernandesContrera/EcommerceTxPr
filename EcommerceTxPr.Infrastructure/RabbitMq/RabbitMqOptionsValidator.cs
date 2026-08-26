@@ -48,6 +48,19 @@ public sealed class RabbitMqOptionsValidator
                 "RabbitMq:PollingIntervalSeconds must be between 1 and 3600.");
         }
 
+        if (options.PrefetchCount is < 1 or > 100)
+        {
+            failures.Add(
+                "RabbitMq:PrefetchCount must be between 1 and 100.");
+        }
+
+        if (options.ConsumerReconnectDelaySeconds is < 1 or > 3600)
+        {
+            failures.Add(
+                "RabbitMq:ConsumerReconnectDelaySeconds must be between 1 "
+                + "and 3600.");
+        }
+
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
