@@ -22,7 +22,10 @@ public sealed class SimulatedDevelopmentPaymentGatewayTests
         var gateway = provider.GetRequiredService<IPaymentGateway>();
 
         var result = await gateway.ProcessAsync(
-            new PaymentGatewayRequest(PaymentId, 25m),
+            new PaymentGatewayRequest(
+                PaymentId,
+                25m,
+                "payment-11111111111111111111111111111111"),
             CancellationToken.None);
 
         Assert.Equal(PaymentGatewayStatus.Succeeded, result.Status);
@@ -39,7 +42,10 @@ public sealed class SimulatedDevelopmentPaymentGatewayTests
         var gateway = provider.GetRequiredService<IPaymentGateway>();
 
         var result = await gateway.ProcessAsync(
-            new PaymentGatewayRequest(PaymentId, 25m),
+            new PaymentGatewayRequest(
+                PaymentId,
+                25m,
+                "payment-11111111111111111111111111111111"),
             CancellationToken.None);
 
         Assert.Equal(PaymentGatewayStatus.Failed, result.Status);
@@ -54,7 +60,10 @@ public sealed class SimulatedDevelopmentPaymentGatewayTests
         var gateway = provider.GetRequiredService<IPaymentGateway>();
 
         var result = await gateway.ProcessAsync(
-            new PaymentGatewayRequest(PaymentId, 25m),
+            new PaymentGatewayRequest(
+                PaymentId,
+                25m,
+                "payment-11111111111111111111111111111111"),
             CancellationToken.None);
 
         Assert.Equal(PaymentGatewayStatus.Succeeded, result.Status);

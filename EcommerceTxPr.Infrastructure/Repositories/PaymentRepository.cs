@@ -38,6 +38,17 @@ public sealed class PaymentRepository : IPaymentRepository
             .ConfigureAwait(false);
     }
 
+    public async Task<Payment?> GetByOrderIdForProcessingAsync(
+        Guid orderId,
+        CancellationToken cancellationToken)
+    {
+        return await _context.Payments
+            .SingleOrDefaultAsync(
+                payment => payment.OrderId == orderId,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task AddAsync(
         Payment payment,
         CancellationToken cancellationToken)

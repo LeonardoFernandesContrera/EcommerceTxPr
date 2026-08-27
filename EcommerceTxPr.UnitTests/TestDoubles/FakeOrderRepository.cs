@@ -5,6 +5,8 @@ namespace EcommerceTxPr.UnitTests.TestDoubles;
 
 internal sealed class FakeOrderRepository : IOrderRepository
 {
+    private readonly Queue<Order?> _getByIdForPaymentResults = new();
+
     public Order? GetByIdResult { get; set; }
 
     public Order? GetByIdForPaymentResult { get; set; }
@@ -14,6 +16,11 @@ internal sealed class FakeOrderRepository : IOrderRepository
     public List<Guid> GetByIdForPaymentRequests { get; } = new();
 
     public List<Order> AddedOrders { get; } = new();
+
+    public void EnqueueGetByIdForPaymentResult(Order? order)
+    {
+        _getByIdForPaymentResults.Enqueue(order);
+    }
 
     public Task<Order?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -26,7 +33,10 @@ internal sealed class FakeOrderRepository : IOrderRepository
         CancellationToken cancellationToken)
     {
         GetByIdForPaymentRequests.Add(id);
-        return Task.FromResult(GetByIdForPaymentResult);
+        var result = _getByIdForPaymentResults.Count > 0
+            ? _getByIdForPaymentResults.Dequeue()
+            : GetByIdForPaymentResult;
+        return Task.FromResult(result);
     }
 
     public Task AddAsync(Order order, CancellationToken cancellationToken)

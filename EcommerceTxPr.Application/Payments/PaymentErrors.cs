@@ -28,4 +28,9 @@ public static class PaymentErrors
         "Payment.ConcurrentModification",
         "The payment or order changed while payment was being persisted.",
         ErrorType.Conflict);
+
+    public static readonly Error OutcomeIndeterminate = new(
+        "Payment.OutcomeIndeterminate",
+        "The payment outcome is temporarily unavailable. Retry the operation.",
+        ErrorType.Unavailable);
 }

@@ -29,6 +29,7 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(payment => payment.Status)
             .HasConversion<string>()
             .HasMaxLength(20)
+            .IsConcurrencyToken()
             .IsRequired();
 
         builder.Property(payment => payment.ProviderReference)

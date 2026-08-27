@@ -38,6 +38,14 @@ public sealed record PaymentGatewayResult
             failureCode);
     }
 
+    public static PaymentGatewayResult Indeterminate()
+    {
+        return new PaymentGatewayResult(
+            PaymentGatewayStatus.Indeterminate,
+            null,
+            null);
+    }
+
     private static void EnsureNotBlank(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))

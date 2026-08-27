@@ -1,6 +1,7 @@
 using EcommerceTxPr.Application.Common;
 using EcommerceTxPr.Application.Orders;
 using EcommerceTxPr.Application.Payments;
+using EcommerceTxPr.Application.Payments.Contracts;
 using EcommerceTxPr.Application.Payments.Gateways;
 using EcommerceTxPr.Application.Payments.Services;
 using EcommerceTxPr.Domain.Entities;
@@ -87,12 +88,12 @@ public sealed class PaymentServiceTests
     }
 
     [Fact]
-    public async Task ProcessPaymentAsync_existing_payment_returns_conflict_without_calling_gateway()
+    public async Task ProcessPaymentAsync_existing_pending_payment_is_resumed()
     {
         var order = CreatePlacedOrder();
         var paymentRepository = new FakePaymentRepository
         {
-            GetByOrderIdResult = new Payment(order.Id, order.Total)
+            GetByOrderIdForProcessingResult = new Payment(order.Id, order.Total)
         };
         var gateway = new FakePaymentGateway();
         var unitOfWork = new FakeUnitOfWork();
@@ -106,15 +107,15 @@ public sealed class PaymentServiceTests
             order.Id,
             CancellationToken.None);
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal(PaymentErrors.AlreadyExists, result.Error);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(PaymentProcessingStatus.Resumed, result.Value?.Status);
         Assert.Empty(paymentRepository.AddedPayments);
-        Assert.Empty(gateway.Requests);
-        Assert.Equal(0, unitOfWork.SaveChangesCalls);
+        Assert.Single(gateway.Requests);
+        Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
-    public async Task ProcessPaymentAsync_success_uses_order_total_marks_paid_and_commits_once()
+    public async Task ProcessPaymentAsync_success_uses_order_total_marks_paid_and_commits_twice()
     {
         var order = CreatePlacedOrder();
         var paymentRepository = new FakePaymentRepository();
@@ -135,17 +136,17 @@ public sealed class PaymentServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
-        Assert.Equal(order.Total, result.Value.Amount);
-        Assert.Equal(PaymentStatus.Succeeded, result.Value.Status);
-        Assert.Equal("provider-123", result.Value.ProviderReference);
-        Assert.Null(result.Value.FailureCode);
+        Assert.Equal(order.Total, result.Value.Payment.Amount);
+        Assert.Equal(PaymentStatus.Succeeded, result.Value.Payment.Status);
+        Assert.Equal("provider-123", result.Value.Payment.ProviderReference);
+        Assert.Null(result.Value.Payment.FailureCode);
         Assert.Equal(OrderStatus.Paid, order.Status);
         var payment = Assert.Single(paymentRepository.AddedPayments);
         Assert.Equal(order.Total, payment.Amount);
         var gatewayRequest = Assert.Single(gateway.Requests);
         Assert.Equal(payment.Id, gatewayRequest.PaymentId);
         Assert.Equal(order.Total, gatewayRequest.Amount);
-        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+        Assert.Equal(2, unitOfWork.SaveChangesCalls);
     }
 
     [Fact]
@@ -170,27 +171,26 @@ public sealed class PaymentServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
-        Assert.Equal(PaymentStatus.Failed, result.Value.Status);
-        Assert.Equal("Declined", result.Value.FailureCode);
-        Assert.Null(result.Value.ProviderReference);
+        Assert.Equal(PaymentStatus.Failed, result.Value.Payment.Status);
+        Assert.Equal("Declined", result.Value.Payment.FailureCode);
+        Assert.Null(result.Value.Payment.ProviderReference);
         Assert.Equal(OrderStatus.Pending, order.Status);
         Assert.Equal(
             PaymentStatus.Failed,
             Assert.Single(paymentRepository.AddedPayments).Status);
         Assert.Single(gateway.Requests);
-        Assert.Equal(1, unitOfWork.SaveChangesCalls);
+        Assert.Equal(2, unitOfWork.SaveChangesCalls);
     }
 
-    [Theory]
-    [InlineData(SaveChangesResult.PaymentConflict, "Payment.AlreadyExists")]
-    [InlineData(SaveChangesResult.ConcurrencyConflict, "Payment.ConcurrentModification")]
-    public async Task ProcessPaymentAsync_known_save_conflict_returns_semantic_conflict(
-        SaveChangesResult saveResult,
-        string expectedCode)
+    [Fact]
+    public async Task ProcessPaymentAsync_initial_concurrency_conflict_does_not_call_gateway()
     {
         var order = CreatePlacedOrder();
         var gateway = new FakePaymentGateway();
-        var unitOfWork = new FakeUnitOfWork { Result = saveResult };
+        var unitOfWork = new FakeUnitOfWork
+        {
+            Result = SaveChangesResult.ConcurrencyConflict
+        };
         var service = new PaymentService(
             new FakeOrderRepository { GetByIdForPaymentResult = order },
             new FakePaymentRepository(),
@@ -202,9 +202,9 @@ public sealed class PaymentServiceTests
             CancellationToken.None);
 
         Assert.False(result.IsSuccess);
-        Assert.Equal(expectedCode, result.Error?.Code);
+        Assert.Equal("Payment.ConcurrentModification", result.Error?.Code);
         Assert.Equal(ErrorType.Conflict, result.Error?.Type);
-        Assert.Single(gateway.Requests);
+        Assert.Empty(gateway.Requests);
         Assert.Equal(1, unitOfWork.SaveChangesCalls);
     }
 

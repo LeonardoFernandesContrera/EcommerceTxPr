@@ -20,6 +20,9 @@ namespace EcommerceApi.V2.ErrorHandling
                 ErrorType.Conflict => (
                     StatusCodes.Status409Conflict,
                     "Conflict"),
+                ErrorType.Unavailable => (
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Service unavailable"),
                 _ => (
                     StatusCodes.Status500InternalServerError,
                     "Internal Server Error")

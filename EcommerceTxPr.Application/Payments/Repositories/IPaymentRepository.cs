@@ -12,6 +12,10 @@ public interface IPaymentRepository
         Guid orderId,
         CancellationToken cancellationToken);
 
+    Task<Payment?> GetByOrderIdForProcessingAsync(
+        Guid orderId,
+        CancellationToken cancellationToken);
+
     Task AddAsync(
         Payment payment,
         CancellationToken cancellationToken);

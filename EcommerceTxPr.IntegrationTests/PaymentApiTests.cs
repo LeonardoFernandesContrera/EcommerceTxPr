@@ -7,6 +7,7 @@ using EcommerceTxPr.Infrastructure.Context;
 using EcommerceTxPr.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -32,6 +33,16 @@ public sealed class PaymentApiTests
         Assert.DoesNotContain(
             postPayment.ParameterDescriptions,
             parameter => parameter.Source == BindingSource.Body);
+        Assert.Contains(
+            postPayment.SupportedResponseTypes,
+            response => response.StatusCode == StatusCodes.Status200OK);
+        Assert.Contains(
+            postPayment.SupportedResponseTypes,
+            response => response.StatusCode == StatusCodes.Status201Created);
+        Assert.Contains(
+            postPayment.SupportedResponseTypes,
+            response => response.StatusCode
+                == StatusCodes.Status503ServiceUnavailable);
     }
 
     [Fact]
@@ -112,7 +123,7 @@ public sealed class PaymentApiTests
     }
 
     [Fact]
-    public async Task Post_duplicate_success_returns_conflict_without_second_gateway_call()
+    public async Task Post_duplicate_success_replays_with_ok_without_second_gateway_call()
     {
         using var factory = new CustomerApiFactory();
         using var client = factory.CreateClientWithDatabase();
@@ -133,16 +144,95 @@ public sealed class PaymentApiTests
             content: null);
 
         Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
-        await ApiTestAssertions.AssertProblemDetailsAsync(
-            duplicateResponse,
-            HttpStatusCode.Conflict,
-            "Payment.OrderAlreadyPaid");
+        Assert.Equal(HttpStatusCode.OK, duplicateResponse.StatusCode);
+        var created = await firstResponse.Content
+            .ReadFromJsonAsync<PaymentResponse>();
+        var replayed = await duplicateResponse.Content
+            .ReadFromJsonAsync<PaymentResponse>();
+        Assert.NotNull(created);
+        Assert.Equal(created, replayed);
         Assert.Single(gateway.Requests);
         using var scope = factory.Services.CreateScope();
         var context = scope.ServiceProvider
             .GetRequiredService<EcommerceTxPrDbContext>();
         Assert.Equal(1, await context.Payments.CountAsync());
         Assert.Equal(1, await context.OutboxMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task Post_duplicate_failure_replays_with_ok_without_second_gateway_call()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var gateway = factory.Services
+            .GetRequiredService<DeterministicTestPaymentGateway>();
+        gateway.Result = PaymentGatewayResult.Failed("CardDeclined");
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(client);
+        var order = await ApiTestData.CreateOrderAsync(
+            client,
+            customer.Id,
+            product.Id);
+
+        using var firstResponse = await client.PostAsync(
+            $"/api/orders/{order.Id}/payments",
+            content: null);
+        using var replayResponse = await client.PostAsync(
+            $"/api/orders/{order.Id}/payments",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var created = await firstResponse.Content
+            .ReadFromJsonAsync<PaymentResponse>();
+        var replayed = await replayResponse.Content
+            .ReadFromJsonAsync<PaymentResponse>();
+        Assert.NotNull(created);
+        Assert.NotNull(replayed);
+        Assert.Equal(created, replayed);
+        Assert.Equal(PaymentStatus.Failed, replayed.Status);
+        Assert.Equal(1, gateway.GatewayRequestCount);
+    }
+
+    [Fact]
+    public async Task Post_indeterminate_returns_503_and_preserves_pending_intent()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var gateway = factory.Services
+            .GetRequiredService<DeterministicTestPaymentGateway>();
+        gateway.Result = PaymentGatewayResult.Indeterminate();
+        var customer = await ApiTestData.CreateCustomerAsync(client);
+        var product = await ApiTestData.CreateProductAsync(client);
+        var order = await ApiTestData.CreateOrderAsync(
+            client,
+            customer.Id,
+            product.Id);
+
+        using var response = await client.PostAsync(
+            $"/api/orders/{order.Id}/payments",
+            content: null);
+
+        await ApiTestAssertions.AssertProblemDetailsAsync(
+            response,
+            HttpStatusCode.ServiceUnavailable,
+            "Payment.OutcomeIndeterminate");
+        using var getResponse = await client.GetAsync(
+            $"/api/orders/{order.Id}/payment");
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        var payment = await getResponse.Content
+            .ReadFromJsonAsync<PaymentResponse>();
+        Assert.NotNull(payment);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        Assert.Equal(OrderStatus.Pending, await context.Orders
+            .Where(candidate => candidate.Id == order.Id)
+            .Select(candidate => candidate.Status)
+            .SingleAsync());
+        Assert.Empty(await context.OutboxMessages.ToListAsync());
+        Assert.Equal(1, gateway.GatewayRequestCount);
     }
 
     [Fact]

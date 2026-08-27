@@ -13,9 +13,11 @@ public sealed class PaymentsController(IPaymentService paymentService)
     private readonly IPaymentService _paymentService = paymentService;
 
     [HttpPost("payments")]
+    [ProducesResponseType<PaymentResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<PaymentResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PaymentResponse>> Process(
         Guid orderId,
         CancellationToken cancellationToken)
@@ -29,10 +31,19 @@ public sealed class PaymentsController(IPaymentService paymentService)
             return this.ToProblemDetails(result.Error!);
         }
 
-        return CreatedAtAction(
-            nameof(GetByOrderId),
-            new { orderId },
-            result.Value!);
+        var processing = result.Value!;
+
+        return processing.Status switch
+        {
+            PaymentProcessingStatus.Created => CreatedAtAction(
+                nameof(GetByOrderId),
+                new { orderId },
+                processing.Payment),
+            PaymentProcessingStatus.Resumed
+                or PaymentProcessingStatus.Replayed => Ok(processing.Payment),
+            _ => throw new InvalidOperationException(
+                $"Unsupported payment processing status: {processing.Status}.")
+        };
     }
 
     [HttpGet("payment")]

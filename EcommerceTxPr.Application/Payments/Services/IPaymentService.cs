@@ -5,7 +5,7 @@ namespace EcommerceTxPr.Application.Payments.Services;
 
 public interface IPaymentService
 {
-    Task<Result<PaymentResponse, Error>> ProcessPaymentAsync(
+    Task<Result<PaymentProcessingResponse, Error>> ProcessPaymentAsync(
         Guid orderId,
         CancellationToken cancellationToken);
 

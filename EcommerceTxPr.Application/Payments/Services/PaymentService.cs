@@ -28,7 +28,7 @@ public sealed class PaymentService : IPaymentService
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<Result<PaymentResponse, Error>> ProcessPaymentAsync(
+    public async Task<Result<PaymentProcessingResponse, Error>> ProcessPaymentAsync(
         Guid orderId,
         CancellationToken cancellationToken)
     {
@@ -38,35 +38,120 @@ public sealed class PaymentService : IPaymentService
 
         if (order is null)
         {
-            return Result<PaymentResponse, Error>.Failure(OrderErrors.NotFound);
+            return Result<PaymentProcessingResponse, Error>.Failure(
+                OrderErrors.NotFound);
         }
 
-        if (order.Status == OrderStatus.Paid)
-        {
-            return Result<PaymentResponse, Error>.Failure(
-                PaymentErrors.OrderAlreadyPaid);
-        }
-
-        if (order.Status != OrderStatus.Pending)
-        {
-            return Result<PaymentResponse, Error>.Failure(
-                PaymentErrors.OrderNotPayable);
-        }
-
-        var existingPayment = await _paymentRepository
-            .GetByOrderIdAsync(order.Id, cancellationToken)
+        var payment = await _paymentRepository
+            .GetByOrderIdForProcessingAsync(order.Id, cancellationToken)
             .ConfigureAwait(false);
 
-        if (existingPayment is not null)
+        if (payment is not null)
         {
-            return Result<PaymentResponse, Error>.Failure(
-                PaymentErrors.AlreadyExists);
+            return await ContinueExistingAsync(
+                    order,
+                    payment,
+                    PaymentProcessingStatus.Resumed,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        var payment = new Payment(order.Id, order.Total);
+        var orderError = GetOrderWithoutPaymentError(order);
+
+        if (orderError is not null)
+        {
+            return Result<PaymentProcessingResponse, Error>.Failure(orderError);
+        }
+
+        payment = new Payment(order.Id, order.Total);
+        await _paymentRepository
+            .AddAsync(payment, cancellationToken)
+            .ConfigureAwait(false);
+        var initialSaveResult = await _unitOfWork
+            .SaveChangesAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (initialSaveResult == SaveChangesResult.PaymentConflict)
+        {
+            var winningState = await ReloadStateAsync(
+                    orderId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (winningState.Payment is null)
+            {
+                throw new InvalidOperationException(
+                    "A payment conflict was reported without a persisted "
+                    + "winning payment.");
+            }
+
+            return await ContinueExistingAsync(
+                    winningState.Order,
+                    winningState.Payment,
+                    PaymentProcessingStatus.Resumed,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (initialSaveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return Result<PaymentProcessingResponse, Error>.Failure(
+                PaymentErrors.ConcurrentModification);
+        }
+
+        EnsureSuccessfulSave(initialSaveResult, "pending payment");
+
+        return await ProcessPendingAsync(
+                order,
+                payment,
+                PaymentProcessingStatus.Created,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<Result<PaymentProcessingResponse, Error>>
+        ContinueExistingAsync(
+            Order order,
+            Payment payment,
+            PaymentProcessingStatus pendingStatus,
+            CancellationToken cancellationToken)
+    {
+        EnsurePaymentBelongsToOrder(payment, order);
+
+        return (payment.Status, order.Status) switch
+        {
+            (PaymentStatus.Pending, OrderStatus.Pending) =>
+                await ProcessPendingAsync(
+                        order,
+                        payment,
+                        pendingStatus,
+                        cancellationToken)
+                    .ConfigureAwait(false),
+            (PaymentStatus.Succeeded, OrderStatus.Paid) =>
+                SuccessfulProcessing(
+                    payment,
+                    PaymentProcessingStatus.Replayed),
+            (PaymentStatus.Failed, OrderStatus.Pending) =>
+                SuccessfulProcessing(
+                    payment,
+                    PaymentProcessingStatus.Replayed),
+            _ => throw InconsistentState(payment, order)
+        };
+    }
+
+    private async Task<Result<PaymentProcessingResponse, Error>>
+        ProcessPendingAsync(
+            Order order,
+            Payment payment,
+            PaymentProcessingStatus processingStatus,
+            CancellationToken cancellationToken)
+    {
         var gatewayResult = await _paymentGateway
             .ProcessAsync(
-                new PaymentGatewayRequest(payment.Id, payment.Amount),
+                new PaymentGatewayRequest(
+                    payment.Id,
+                    payment.Amount,
+                    PaymentProviderIdempotencyKey.Create(payment.Id)),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -79,32 +164,137 @@ public sealed class PaymentService : IPaymentService
             case PaymentGatewayStatus.Failed:
                 payment.MarkFailed(gatewayResult.FailureCode!);
                 break;
+            case PaymentGatewayStatus.Indeterminate:
+                return Result<PaymentProcessingResponse, Error>.Failure(
+                    PaymentErrors.OutcomeIndeterminate);
             default:
                 throw new InvalidOperationException(
                     $"Unsupported payment gateway status: {gatewayResult.Status}.");
         }
 
-        await _paymentRepository
-            .AddAsync(payment, cancellationToken)
-            .ConfigureAwait(false);
-
         var saveResult = await _unitOfWork
             .SaveChangesAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return saveResult switch
+        if (saveResult == SaveChangesResult.Success)
         {
-            SaveChangesResult.Success =>
-                Result<PaymentResponse, Error>.Success(ToResponse(payment)),
-            SaveChangesResult.PaymentConflict =>
-                Result<PaymentResponse, Error>.Failure(
-                    PaymentErrors.AlreadyExists),
-            SaveChangesResult.ConcurrencyConflict =>
-                Result<PaymentResponse, Error>.Failure(
+            return SuccessfulProcessing(payment, processingStatus);
+        }
+
+        if (saveResult == SaveChangesResult.ConcurrencyConflict)
+        {
+            return await ReconcileTerminalConflictAsync(
+                    order.Id,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException(
+            $"Unsupported terminal payment save result: {saveResult}.");
+    }
+
+    private async Task<Result<PaymentProcessingResponse, Error>>
+        ReconcileTerminalConflictAsync(
+            Guid orderId,
+            CancellationToken cancellationToken)
+    {
+        var persisted = await ReloadStateAsync(orderId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (persisted.Payment is null)
+        {
+            throw new InvalidOperationException(
+                "A terminal payment concurrency conflict was reported for a "
+                + "missing payment.");
+        }
+
+        EnsurePaymentBelongsToOrder(persisted.Payment, persisted.Order);
+
+        return (persisted.Payment.Status, persisted.Order.Status) switch
+        {
+            (PaymentStatus.Succeeded, OrderStatus.Paid) =>
+                SuccessfulProcessing(
+                    persisted.Payment,
+                    PaymentProcessingStatus.Replayed),
+            (PaymentStatus.Failed, OrderStatus.Pending) =>
+                SuccessfulProcessing(
+                    persisted.Payment,
+                    PaymentProcessingStatus.Replayed),
+            (PaymentStatus.Pending, OrderStatus.Pending) =>
+                Result<PaymentProcessingResponse, Error>.Failure(
                     PaymentErrors.ConcurrentModification),
-            _ => throw new InvalidOperationException(
-                $"Unsupported save result: {saveResult}.")
+            _ => throw InconsistentState(persisted.Payment, persisted.Order)
         };
+    }
+
+    private async Task<(Order Order, Payment? Payment)> ReloadStateAsync(
+        Guid orderId,
+        CancellationToken cancellationToken)
+    {
+        var order = await _orderRepository
+            .GetByIdForPaymentAsync(orderId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (order is null)
+        {
+            throw new InvalidOperationException(
+                "A payment operation references a missing order.");
+        }
+
+        var payment = await _paymentRepository
+            .GetByOrderIdForProcessingAsync(orderId, cancellationToken)
+            .ConfigureAwait(false);
+        return (order, payment);
+    }
+
+    private static Error? GetOrderWithoutPaymentError(Order order)
+    {
+        return order.Status switch
+        {
+            OrderStatus.Pending => null,
+            OrderStatus.Paid => PaymentErrors.OrderAlreadyPaid,
+            _ => PaymentErrors.OrderNotPayable
+        };
+    }
+
+    private static void EnsurePaymentBelongsToOrder(
+        Payment payment,
+        Order order)
+    {
+        if (payment.OrderId != order.Id || payment.Amount != order.Total)
+        {
+            throw new InvalidOperationException(
+                "The persisted payment does not match its order.");
+        }
+    }
+
+    private static InvalidOperationException InconsistentState(
+        Payment payment,
+        Order order)
+    {
+        return new InvalidOperationException(
+            "Inconsistent persisted payment and order state: "
+            + $"Payment={payment.Status}, Order={order.Status}.");
+    }
+
+    private static void EnsureSuccessfulSave(
+        SaveChangesResult saveResult,
+        string operation)
+    {
+        if (saveResult != SaveChangesResult.Success)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported {operation} save result: {saveResult}.");
+        }
+    }
+
+    private static Result<PaymentProcessingResponse, Error>
+        SuccessfulProcessing(
+            Payment payment,
+            PaymentProcessingStatus status)
+    {
+        return Result<PaymentProcessingResponse, Error>.Success(
+            new PaymentProcessingResponse(ToResponse(payment), status));
     }
 
     public async Task<Result<PaymentResponse, Error>> GetByOrderIdAsync(

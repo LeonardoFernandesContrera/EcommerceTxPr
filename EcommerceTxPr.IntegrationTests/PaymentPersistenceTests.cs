@@ -104,6 +104,114 @@ public sealed class PaymentPersistenceTests
                 .SingleAsync());
     }
 
+    [Fact]
+    public async Task Payment_processing_read_is_tracked_and_persists_transition()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var paymentId = await SeedPendingPaymentAsync(factory);
+
+        using (var processingScope = factory.Services.CreateScope())
+        {
+            var repository = processingScope.ServiceProvider
+                .GetRequiredService<IPaymentRepository>();
+            var payment = await repository.GetByOrderIdForProcessingAsync(
+                await GetOrderIdAsync(processingScope, paymentId),
+                CancellationToken.None);
+            Assert.NotNull(payment);
+            payment.MarkFailed("TrackedDecline");
+            var unitOfWork = processingScope.ServiceProvider
+                .GetRequiredService<IUnitOfWork>();
+            Assert.Equal(
+                SaveChangesResult.Success,
+                await unitOfWork.SaveChangesAsync(CancellationToken.None));
+        }
+
+        using var verificationScope = factory.Services.CreateScope();
+        var context = verificationScope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        var persisted = await context.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == paymentId);
+        Assert.Equal(PaymentStatus.Failed, persisted.Status);
+        Assert.Equal("TrackedDecline", persisted.FailureCode);
+    }
+
+    [Fact]
+    public async Task Pending_payment_allows_only_one_terminal_commit_and_outbox()
+    {
+        using var factory = new CustomerApiFactory();
+        using var client = factory.CreateClientWithDatabase();
+        var paymentId = await SeedPendingPaymentAsync(factory);
+        using var firstScope = factory.Services.CreateScope();
+        using var secondScope = factory.Services.CreateScope();
+        var firstRepository = firstScope.ServiceProvider
+            .GetRequiredService<IPaymentRepository>();
+        var secondRepository = secondScope.ServiceProvider
+            .GetRequiredService<IPaymentRepository>();
+        var orderId = await GetOrderIdAsync(firstScope, paymentId);
+        var firstPayment = await firstRepository
+            .GetByOrderIdForProcessingAsync(orderId, CancellationToken.None);
+        var secondPayment = await secondRepository
+            .GetByOrderIdForProcessingAsync(orderId, CancellationToken.None);
+        Assert.NotNull(firstPayment);
+        Assert.NotNull(secondPayment);
+
+        firstPayment.MarkFailed("FirstDecline");
+        secondPayment.MarkFailed("LosingDecline");
+        var firstUnitOfWork = firstScope.ServiceProvider
+            .GetRequiredService<IUnitOfWork>();
+        var secondUnitOfWork = secondScope.ServiceProvider
+            .GetRequiredService<IUnitOfWork>();
+
+        Assert.Equal(
+            SaveChangesResult.Success,
+            await firstUnitOfWork.SaveChangesAsync(CancellationToken.None));
+        Assert.Equal(
+            SaveChangesResult.ConcurrencyConflict,
+            await secondUnitOfWork.SaveChangesAsync(CancellationToken.None));
+        var losingContext = secondScope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        Assert.Empty(losingContext.ChangeTracker.Entries());
+
+        using var verificationScope = factory.Services.CreateScope();
+        var context = verificationScope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        var persisted = await context.Payments
+            .AsNoTracking()
+            .SingleAsync(payment => payment.Id == paymentId);
+        Assert.Equal(PaymentStatus.Failed, persisted.Status);
+        Assert.Equal("FirstDecline", persisted.FailureCode);
+        Assert.Equal(1, await context.OutboxMessages.CountAsync());
+    }
+
+    private static async Task<Guid> SeedPendingPaymentAsync(
+        CustomerApiFactory factory)
+    {
+        var (orderId, total) = await SeedPlacedOrderAsync(factory);
+        var payment = new Payment(orderId, total);
+
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        context.Payments.Add(payment);
+        await context.SaveChangesAsync();
+        return payment.Id;
+    }
+
+    private static async Task<Guid> GetOrderIdAsync(
+        IServiceScope scope,
+        Guid paymentId)
+    {
+        var context = scope.ServiceProvider
+            .GetRequiredService<EcommerceTxPrDbContext>();
+        return await context.Payments
+            .AsNoTracking()
+            .Where(payment => payment.Id == paymentId)
+            .Select(payment => payment.OrderId)
+            .SingleAsync();
+    }
+
     private static async Task<(Guid OrderId, decimal Total)> SeedPlacedOrderAsync(
         CustomerApiFactory factory)
     {
