@@ -1,6 +1,9 @@
 using EcommerceApi.V2.ErrorHandling;
+using EcommerceApi.V2.Health;
 using EcommerceTxPr.Application;
 using EcommerceTxPr.Infrastructure;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,7 +26,22 @@ if (builder.Environment.IsDevelopment())
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddHealthChecks();
+builder.Services
+    .AddHealthChecks()
+    .AddCheck(
+        "self",
+        () => HealthCheckResult.Healthy("Application is running."),
+        tags: ["live"])
+    .AddCheck<PrimaryDatabaseHealthCheck>(
+        "sql",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: ["ready"],
+        timeout: TimeSpan.FromSeconds(3))
+    .AddCheck<RabbitMqDependencyHealthCheck>(
+        "rabbitmq",
+        failureStatus: HealthStatus.Degraded,
+        tags: ["broker"],
+        timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -42,7 +60,31 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapHealthChecks(
+    "/health/live",
+    CreateHealthCheckOptions(registration =>
+        registration.Tags.Contains("live")));
+app.MapHealthChecks(
+    "/health/ready",
+    CreateHealthCheckOptions(registration =>
+        registration.Tags.Contains("ready")));
+app.MapHealthChecks("/health", CreateHealthCheckOptions());
+
+static HealthCheckOptions CreateHealthCheckOptions(
+    Func<HealthCheckRegistration, bool>? predicate = null)
+{
+    return new HealthCheckOptions
+    {
+        Predicate = predicate,
+        ResponseWriter = HealthCheckResponseWriter.WriteAsync,
+        ResultStatusCodes =
+        {
+            [HealthStatus.Healthy] = StatusCodes.Status200OK,
+            [HealthStatus.Degraded] = StatusCodes.Status200OK,
+            [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable
+        }
+    };
+}
 
 app.Run();
 

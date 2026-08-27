@@ -71,8 +71,8 @@ public sealed class PaymentProcessingConcurrencyTests
                 creationRace.WinningPaymentId,
                 request.PaymentId));
         var losingPaymentId = Assert.Single(
-            creationRace.CandidatePaymentIds.Where(
-                paymentId => paymentId != creationRace.WinningPaymentId));
+            creationRace.CandidatePaymentIds,
+            paymentId => paymentId != creationRace.WinningPaymentId);
         Assert.DoesNotContain(
             gateway.Requests,
             request => request.PaymentId == losingPaymentId);

@@ -27,15 +27,17 @@ public sealed class OrderApiTests
             .ApiDescriptionGroups
             .Items
             .SelectMany(group => group.Items);
-        var postOrder = Assert.Single(descriptions.Where(description =>
+        var postOrder = Assert.Single(descriptions, description =>
             description.HttpMethod == HttpMethod.Post.Method
-            && description.RelativePath == "api/orders"));
+            && description.RelativePath == "api/orders");
 
-        var header = Assert.Single(postOrder.ParameterDescriptions.Where(
-            parameter => parameter.Name == "Idempotency-Key"));
+        var header = Assert.Single(
+            postOrder.ParameterDescriptions,
+            parameter => parameter.Name == "Idempotency-Key");
         Assert.Equal(BindingSource.Header, header.Source);
-        var badRequest = Assert.Single(postOrder.SupportedResponseTypes.Where(
-            response => response.StatusCode == StatusCodes.Status400BadRequest));
+        var badRequest = Assert.Single(
+            postOrder.SupportedResponseTypes,
+            response => response.StatusCode == StatusCodes.Status400BadRequest);
         Assert.Equal(typeof(ProblemDetails), badRequest.Type);
     }
 

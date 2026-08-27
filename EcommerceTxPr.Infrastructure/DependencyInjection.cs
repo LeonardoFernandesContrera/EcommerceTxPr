@@ -5,6 +5,7 @@ using EcommerceTxPr.Application.Payments.Gateways;
 using EcommerceTxPr.Application.Payments.Repositories;
 using EcommerceTxPr.Application.Products.Repositories;
 using EcommerceTxPr.Infrastructure.Context;
+using EcommerceTxPr.Infrastructure.Health;
 using EcommerceTxPr.Infrastructure.Inbox;
 using EcommerceTxPr.Infrastructure.Outbox;
 using EcommerceTxPr.Infrastructure.Persistence;
@@ -24,8 +25,7 @@ namespace EcommerceTxPr.Infrastructure
             this IServiceCollection services,
             string connectionString)
         {
-            services.AddDbContext<EcommerceTxPrDbContext>(
-                options => options.UseSqlServer(connectionString));
+            services.AddDatabase(connectionString);
             services.AddScoped<ICustomerRepository, CustomerRepository>();
             services.AddScoped<IProductRepository, ProductRepository>();
             services.AddScoped<IOrderRepository, OrderRepository>();
@@ -37,6 +37,20 @@ namespace EcommerceTxPr.Infrastructure
                 IDatabaseErrorClassifier,
                 SqlServerDatabaseErrorClassifier>();
             services.AddScoped<IUnitOfWork, EfUnitOfWork>();
+            services.AddSingleton<
+                IPrimaryDatabaseHealthProbe,
+                PrimaryDatabaseHealthProbe>();
+            services.AddSingleton<IRabbitMqHealthProbe, RabbitMqHealthProbe>();
+
+            return services;
+        }
+
+        public static IServiceCollection AddDatabase(
+            this IServiceCollection services,
+            string connectionString)
+        {
+            services.AddDbContext<EcommerceTxPrDbContext>(
+                options => options.UseSqlServer(connectionString));
 
             return services;
         }

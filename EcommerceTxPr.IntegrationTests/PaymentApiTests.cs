@@ -25,10 +25,10 @@ public sealed class PaymentApiTests
             .ApiDescriptionGroups
             .Items
             .SelectMany(group => group.Items);
-        var postPayment = Assert.Single(descriptions.Where(description =>
+        var postPayment = Assert.Single(descriptions, description =>
             description.HttpMethod == HttpMethod.Post.Method
             && description.RelativePath
-                == "api/orders/{orderId}/payments"));
+                == "api/orders/{orderId}/payments");
 
         Assert.DoesNotContain(
             postPayment.ParameterDescriptions,

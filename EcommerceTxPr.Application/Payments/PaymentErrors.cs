@@ -9,11 +9,6 @@ public static class PaymentErrors
         "The payment was not found.",
         ErrorType.NotFound);
 
-    public static readonly Error AlreadyExists = new(
-        "Payment.AlreadyExists",
-        "A payment already exists for this order.",
-        ErrorType.Conflict);
-
     public static readonly Error OrderAlreadyPaid = new(
         "Payment.OrderAlreadyPaid",
         "The order has already been paid.",
