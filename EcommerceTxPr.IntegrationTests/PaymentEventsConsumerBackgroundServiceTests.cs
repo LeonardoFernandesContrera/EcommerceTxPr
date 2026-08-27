@@ -45,23 +45,76 @@ public sealed class PaymentEventsConsumerBackgroundServiceTests
         Assert.Equal(1, factory.CreateCalls);
     }
 
-    private static PaymentEventsConsumerBackgroundService CreateService(
-        IRabbitMqPaymentEventsConsumerSessionFactory factory)
+    [Fact]
+    public async Task Ended_session_is_disposed_and_reconnect_delay_throttles_next_session()
     {
-        return new PaymentEventsConsumerBackgroundService(
+        var firstSession = new RecordingConsumerSession(completed: true);
+        var secondSession = new RecordingConsumerSession(completed: false);
+        var factory = new ScriptedConsumerSessionFactory();
+        factory.EnqueueSession(firstSession);
+        factory.EnqueueSession(secondSession);
+        var delayStarted = new TaskCompletionSource<TimeSpan>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var service = CreateService(
             factory,
-            Options.Create(new RabbitMqOptions
+            (delay, cancellationToken) =>
             {
-                Enabled = true,
-                ConsumerReconnectDelaySeconds = 5
-            }),
-            NullLogger<PaymentEventsConsumerBackgroundService>.Instance);
+                delayStarted.TrySetResult(delay);
+                return releaseDelay.Task.WaitAsync(cancellationToken);
+            });
+
+        await service.StartAsync(CancellationToken.None);
+        var observedDelay = await delayStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(TimeSpan.FromSeconds(5), observedDelay);
+        Assert.True(firstSession.IsDisposed);
+        Assert.Equal(1, factory.CreateCalls);
+
+        releaseDelay.SetResult(null);
+        await factory.SecondCreateStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, factory.CreateCalls);
+        Assert.False(secondSession.IsDisposed);
+
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.True(secondSession.IsDisposed);
+    }
+
+    private static PaymentEventsConsumerBackgroundService CreateService(
+        IRabbitMqPaymentEventsConsumerSessionFactory factory,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+    {
+        var options = Options.Create(new RabbitMqOptions
+        {
+            Enabled = true,
+            ConsumerReconnectDelaySeconds = 5
+        });
+        var logger = NullLogger<PaymentEventsConsumerBackgroundService>.Instance;
+
+        return delayAsync is null
+            ? new PaymentEventsConsumerBackgroundService(
+                factory,
+                options,
+                logger)
+            : new PaymentEventsConsumerBackgroundService(
+                factory,
+                options,
+                logger,
+                delayAsync);
     }
 
     private sealed class ScriptedConsumerSessionFactory
         : IRabbitMqPaymentEventsConsumerSessionFactory
     {
         private readonly Queue<object> _results = new();
+
+        public TaskCompletionSource<object?> SecondCreateStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int CreateCalls { get; private set; }
 
@@ -79,6 +132,11 @@ public sealed class PaymentEventsConsumerBackgroundServiceTests
             CancellationToken cancellationToken)
         {
             CreateCalls++;
+            if (CreateCalls == 2)
+            {
+                SecondCreateStarted.TrySetResult(null);
+            }
+
             var result = _results.Dequeue();
 
             return result switch

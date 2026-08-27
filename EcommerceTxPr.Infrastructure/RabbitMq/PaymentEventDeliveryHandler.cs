@@ -18,7 +18,7 @@ internal sealed class PaymentEventDeliveryHandler
         _logger = logger;
     }
 
-    public async Task HandleAsync(
+    public async Task<PaymentEventDeliveryHandlingResult> HandleAsync(
         PaymentIntegrationEventDelivery delivery,
         ulong deliveryTag,
         IPaymentDeliveryAcknowledger acknowledger,
@@ -47,13 +47,14 @@ internal sealed class PaymentEventDeliveryHandler
             _logger.LogWarning(
                 exception,
                 "Transient payment-event processing failure for MessageId "
-                + "{MessageId} and Type {Type}; delivery will be requeued.",
+                + "{MessageId} and Type {Type}; delivery will be requeued "
+                + "and the consumer session recycled.",
                 delivery.MessageId,
                 delivery.Type);
             await acknowledger
                 .NackAsync(deliveryTag, requeue: true, cancellationToken)
                 .ConfigureAwait(false);
-            return;
+            return PaymentEventDeliveryHandlingResult.EndSession;
         }
 
         switch (result)
@@ -66,7 +67,7 @@ internal sealed class PaymentEventDeliveryHandler
                 await acknowledger
                     .AckAsync(deliveryTag, cancellationToken)
                     .ConfigureAwait(false);
-                return;
+                return PaymentEventDeliveryHandlingResult.Continue;
             case PaymentIntegrationEventProcessingResult.Duplicate:
                 _logger.LogInformation(
                     "Acknowledging duplicate payment event {MessageId} of "
@@ -76,7 +77,7 @@ internal sealed class PaymentEventDeliveryHandler
                 await acknowledger
                     .AckAsync(deliveryTag, cancellationToken)
                     .ConfigureAwait(false);
-                return;
+                return PaymentEventDeliveryHandlingResult.Continue;
             case PaymentIntegrationEventProcessingResult.Poison:
                 _logger.LogWarning(
                     "Rejecting poison payment event {MessageId} of type {Type} "
@@ -86,7 +87,7 @@ internal sealed class PaymentEventDeliveryHandler
                 await acknowledger
                     .RejectAsync(deliveryTag, requeue: false, cancellationToken)
                     .ConfigureAwait(false);
-                return;
+                return PaymentEventDeliveryHandlingResult.Continue;
             default:
                 throw new InvalidOperationException(
                     $"Unsupported payment event processing result: {result}.");

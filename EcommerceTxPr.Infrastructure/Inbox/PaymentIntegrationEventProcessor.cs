@@ -42,16 +42,14 @@ internal sealed class PaymentIntegrationEventProcessor
             return PaymentIntegrationEventProcessingResult.Poison;
         }
 
-        var alreadyProcessed = await _context.InboxMessages
-            .AsNoTracking()
-            .AnyAsync(
-                message => message.MessageId == messageId,
+        var existingType = await GetInboxTypeAsync(
+                messageId,
                 cancellationToken)
             .ConfigureAwait(false);
 
-        if (alreadyProcessed)
+        if (existingType is not null)
         {
-            return PaymentIntegrationEventProcessingResult.Duplicate;
+            return ClassifyExistingIdentity(existingType, delivery.Type!);
         }
 
         var processedOnUtc = DateTime.UtcNow;
@@ -90,20 +88,41 @@ internal sealed class PaymentIntegrationEventProcessor
 
             _context.ChangeTracker.Clear();
 
-            var winningInboxExists = await _context.InboxMessages
-                .AsNoTracking()
-                .AnyAsync(
-                    message => message.MessageId == messageId,
+            var winningType = await GetInboxTypeAsync(
+                    messageId,
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            if (!winningInboxExists)
+            if (winningType is null)
             {
                 throw;
             }
 
-            return PaymentIntegrationEventProcessingResult.Duplicate;
+            return ClassifyExistingIdentity(winningType, delivery.Type!);
         }
+    }
+
+    private async Task<string?> GetInboxTypeAsync(
+        Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        return await _context.InboxMessages
+            .AsNoTracking()
+            .Where(message => message.MessageId == messageId)
+            .Select(message => message.Type)
+            .SingleOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static PaymentIntegrationEventProcessingResult
+        ClassifyExistingIdentity(string storedType, string incomingType)
+    {
+        return string.Equals(
+            storedType,
+            incomingType,
+            StringComparison.Ordinal)
+            ? PaymentIntegrationEventProcessingResult.Duplicate
+            : PaymentIntegrationEventProcessingResult.Poison;
     }
 
     private static bool IsSupportedAndConsistentType(

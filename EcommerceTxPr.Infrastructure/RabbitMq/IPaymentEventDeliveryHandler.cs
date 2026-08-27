@@ -4,7 +4,7 @@ namespace EcommerceTxPr.Infrastructure.RabbitMq;
 
 internal interface IPaymentEventDeliveryHandler
 {
-    Task HandleAsync(
+    Task<PaymentEventDeliveryHandlingResult> HandleAsync(
         PaymentIntegrationEventDelivery delivery,
         ulong deliveryTag,
         IPaymentDeliveryAcknowledger acknowledger,

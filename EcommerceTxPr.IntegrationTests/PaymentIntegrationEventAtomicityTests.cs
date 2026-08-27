@@ -114,6 +114,32 @@ public sealed class PaymentIntegrationEventAtomicityTests
         Assert.Equal("winning-reference", projection.ProviderReference);
     }
 
+    [Fact]
+    public async Task Inbox_race_with_different_winning_type_is_poison()
+    {
+        await using var database = await AtomicityDatabase.CreateAsync();
+        var messageId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var delivery = CreateDelivery(messageId);
+        await using var losingContext = database.CreateRacingContext(
+            cancellationToken => database.PersistFailedWinnerAsync(
+                messageId,
+                cancellationToken));
+
+        var result = await CreateProcessor(losingContext).ProcessAsync(
+            delivery,
+            CancellationToken.None);
+
+        Assert.Equal(PaymentIntegrationEventProcessingResult.Poison, result);
+        Assert.Empty(losingContext.ChangeTracker.Entries());
+        await using var verificationContext = database.CreateContext();
+        Assert.Equal(1, await verificationContext.InboxMessages.CountAsync());
+        var projection = await verificationContext.PaymentEventProjections
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(PaymentEventOutcome.Failed, projection.Outcome);
+        Assert.Equal("WinningFailure", projection.FailureCode);
+    }
+
     private static PaymentIntegrationEventProcessor CreateProcessor(
         EcommerceTxPrDbContext context)
     {
@@ -196,6 +222,36 @@ public sealed class PaymentIntegrationEventAtomicityTests
                     Guid.Parse("33333333-3333-3333-3333-333333333333"),
                     25.50m,
                     "winning-reference",
+                    occurredOnUtc,
+                    processedOnUtc));
+            await context.SaveChangesAsync(cancellationToken);
+        }
+
+        public async Task PersistFailedWinnerAsync(
+            Guid messageId,
+            CancellationToken cancellationToken)
+        {
+            var occurredOnUtc = new DateTime(
+                2026,
+                8,
+                26,
+                10,
+                0,
+                0,
+                DateTimeKind.Utc);
+            var processedOnUtc = occurredOnUtc.AddMinutes(1);
+            await using var context = CreateContext();
+            context.InboxMessages.Add(new InboxMessage(
+                messageId,
+                OutboxMessageTypes.PaymentFailedV1,
+                processedOnUtc));
+            context.PaymentEventProjections.Add(
+                PaymentEventProjection.Failed(
+                    messageId,
+                    Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                    Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                    25.50m,
+                    "WinningFailure",
                     occurredOnUtc,
                     processedOnUtc));
             await context.SaveChangesAsync(cancellationToken);

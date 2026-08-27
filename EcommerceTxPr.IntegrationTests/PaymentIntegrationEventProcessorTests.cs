@@ -110,6 +110,32 @@ public sealed class PaymentIntegrationEventProcessorTests
                 .SingleAsync());
     }
 
+    [Fact]
+    public async Task Existing_identity_with_different_type_is_poison_without_save()
+    {
+        await using var database = await ProcessorDatabase.CreateAsync();
+        var messageId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        await database.SeedSucceededAsync(messageId, "winning-reference");
+        await using var context = database.CreateCountingContext();
+        var processor = CreateProcessor(context);
+
+        var result = await processor.ProcessAsync(
+            Delivery(
+                messageId.ToString("D"),
+                OutboxMessageTypes.PaymentFailedV1,
+                "not-json"),
+            CancellationToken.None);
+
+        Assert.Equal(PaymentIntegrationEventProcessingResult.Poison, result);
+        Assert.Equal(0, context.SaveChangesCalls);
+        Assert.Equal(1, await context.InboxMessages.CountAsync());
+        var projection = await context.PaymentEventProjections
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(PaymentEventOutcome.Succeeded, projection.Outcome);
+        Assert.Equal("winning-reference", projection.ProviderReference);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

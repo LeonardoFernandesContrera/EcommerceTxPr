@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using EcommerceTxPr.Infrastructure.Outbox;
 using EcommerceTxPr.Infrastructure.RabbitMq;
@@ -84,6 +85,23 @@ public sealed class RabbitMqConsumerSessionTests
             RabbitMqPublisherSessionFactory.RoutingKeys);
     }
 
+    [Fact]
+    public async Task Broker_consumer_cancellation_completes_session_for_reconnect()
+    {
+        var completion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var channel = DispatchProxy.Create<IChannel, ThrowingChannelProxy>();
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        RabbitMqPaymentEventsConsumerSessionFactory
+            .ObserveConsumerCancellation(consumer, completion);
+
+        await consumer.HandleBasicCancelAsync(
+            "broker-cancelled-consumer",
+            CancellationToken.None);
+
+        Assert.True(completion.Task.IsCompletedSuccessfully);
+    }
+
     private static RabbitMqOptions CreateOptions()
     {
         return new RabbitMqOptions
@@ -98,5 +116,16 @@ public sealed class RabbitMqConsumerSessionTests
             PaymentEventsQueueName = "ecommerce.payment-events",
             PrefetchCount = 1
         };
+    }
+
+    public class ThrowingChannelProxy : DispatchProxy
+    {
+        protected override object? Invoke(
+            MethodInfo? targetMethod,
+            object?[]? args)
+        {
+            throw new InvalidOperationException(
+                $"Unexpected channel call: {targetMethod?.Name}.");
+        }
     }
 }

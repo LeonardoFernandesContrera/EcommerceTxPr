@@ -11,15 +11,31 @@ internal sealed class PaymentEventsConsumerBackgroundService
         _sessionFactory;
     private readonly RabbitMqOptions _options;
     private readonly ILogger<PaymentEventsConsumerBackgroundService> _logger;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
     public PaymentEventsConsumerBackgroundService(
         IRabbitMqPaymentEventsConsumerSessionFactory sessionFactory,
         IOptions<RabbitMqOptions> options,
         ILogger<PaymentEventsConsumerBackgroundService> logger)
+        : this(
+            sessionFactory,
+            options,
+            logger,
+            static (delay, cancellationToken) =>
+                Task.Delay(delay, cancellationToken))
+    {
+    }
+
+    internal PaymentEventsConsumerBackgroundService(
+        IRabbitMqPaymentEventsConsumerSessionFactory sessionFactory,
+        IOptions<RabbitMqOptions> options,
+        ILogger<PaymentEventsConsumerBackgroundService> logger,
+        Func<TimeSpan, CancellationToken, Task> delayAsync)
     {
         _sessionFactory = sessionFactory;
         _options = options.Value;
         _logger = logger;
+        _delayAsync = delayAsync;
     }
 
     protected override async Task ExecuteAsync(
@@ -48,7 +64,7 @@ internal sealed class PaymentEventsConsumerBackgroundService
                     + "failed; a later cycle will retry.");
             }
 
-            await Task.Delay(
+            await _delayAsync(
                     TimeSpan.FromSeconds(
                         _options.ConsumerReconnectDelaySeconds),
                     stoppingToken)

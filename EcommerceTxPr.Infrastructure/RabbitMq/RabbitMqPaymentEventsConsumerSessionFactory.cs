@@ -69,14 +69,16 @@ internal sealed class RabbitMqPaymentEventsConsumerSessionFactory
 
             var acknowledger = new RabbitMqPaymentDeliveryAcknowledger(channel);
             var consumer = new AsyncEventingBasicConsumer(channel);
+            ObserveConsumerCancellation(consumer, completion);
             consumer.ReceivedAsync += async (_, args) =>
             {
                 var delivery = CopyDelivery(args);
-                await _deliveryHandler
-                    .HandleAsync(
+                await HandleDeliveryAsync(
+                        _deliveryHandler,
                         delivery,
                         args.DeliveryTag,
                         acknowledger,
+                        completion,
                         args.CancellationToken)
                     .ConfigureAwait(false);
             };
@@ -144,6 +146,51 @@ internal sealed class RabbitMqPaymentEventsConsumerSessionFactory
             args.BasicProperties.Type,
             args.RoutingKey,
             args.Body.ToArray());
+    }
+
+    internal static async Task HandleDeliveryAsync(
+        IPaymentEventDeliveryHandler deliveryHandler,
+        PaymentIntegrationEventDelivery delivery,
+        ulong deliveryTag,
+        IPaymentDeliveryAcknowledger acknowledger,
+        TaskCompletionSource<object?> sessionCompletion,
+        CancellationToken cancellationToken)
+    {
+        if (sessionCompletion.Task.IsCompleted)
+        {
+            return;
+        }
+
+        var result = await deliveryHandler
+            .HandleAsync(
+                delivery,
+                deliveryTag,
+                acknowledger,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        switch (result)
+        {
+            case PaymentEventDeliveryHandlingResult.Continue:
+                return;
+            case PaymentEventDeliveryHandlingResult.EndSession:
+                sessionCompletion.TrySetResult(null);
+                return;
+            default:
+                throw new InvalidOperationException(
+                    $"Unsupported delivery handling result: {result}.");
+        }
+    }
+
+    internal static void ObserveConsumerCancellation(
+        AsyncEventingBasicConsumer consumer,
+        TaskCompletionSource<object?> sessionCompletion)
+    {
+        consumer.UnregisteredAsync += (_, _) =>
+        {
+            sessionCompletion.TrySetResult(null);
+            return Task.CompletedTask;
+        };
     }
 
     private static CreateChannelOptions CreateChannelOptions()
