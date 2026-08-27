@@ -143,7 +143,11 @@ wait_for_http http://localhost:8080/health/ready 60
 wait_for_http http://localhost:8080/health 60
 
 full_health="$(curl --fail --silent http://localhost:8080/health)"
-grep --quiet '"status":"Healthy"' <<<"$full_health" \
+jq --exit-status '
+    .status == "Healthy"
+    and .checks.sql.status == "Healthy"
+    and .checks.rabbitmq.status == "Healthy"
+' <<<"$full_health" >/dev/null \
     || fail "The full dependency health endpoint is not Healthy."
 
 customer_status="$(curl \

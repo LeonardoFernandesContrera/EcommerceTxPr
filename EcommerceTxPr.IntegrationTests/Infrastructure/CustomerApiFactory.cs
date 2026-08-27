@@ -20,6 +20,13 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
 
     private readonly Action<IServiceCollection>? _configureTestServices;
     private readonly IReadOnlyDictionary<string, string?>? _configurationValues;
+    private readonly string _databaseConnectionString =
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = $"EcommerceTxPrTests-{Guid.NewGuid():N}",
+            Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared
+        }.ToString();
 
     static CustomerApiFactory()
     {
@@ -65,16 +72,14 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
 
             services.AddSingleton<DbConnection>(_ =>
             {
-                var connection = new SqliteConnection("Data Source=:memory:");
+                var connection = new SqliteConnection(
+                    _databaseConnectionString);
                 connection.Open();
                 return connection;
             });
 
-            services.AddDbContext<EcommerceTxPrDbContext>((serviceProvider, options) =>
-            {
-                var connection = serviceProvider.GetRequiredService<DbConnection>();
-                options.UseSqlite(connection);
-            });
+            services.AddDbContext<EcommerceTxPrDbContext>(options =>
+                options.UseSqlite(_databaseConnectionString));
 
             services.RemoveAll<IDatabaseErrorClassifier>();
             services.AddScoped<
@@ -98,6 +103,7 @@ public sealed class CustomerApiFactory : WebApplicationFactory<Program>
                 BaseAddress = new Uri("https://localhost")
             });
 
+        _ = Services.GetRequiredService<DbConnection>();
         using var scope = Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<EcommerceTxPrDbContext>();
         context.Database.EnsureCreated();

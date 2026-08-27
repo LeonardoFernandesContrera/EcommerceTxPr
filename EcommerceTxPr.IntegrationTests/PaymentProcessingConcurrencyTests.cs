@@ -8,6 +8,7 @@ using EcommerceTxPr.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Xunit.Sdk;
 
 namespace EcommerceTxPr.IntegrationTests;
 
@@ -29,20 +30,28 @@ public sealed class PaymentProcessingConcurrencyTests
             .GetRequiredService<DeterministicTestPaymentGateway>();
         var responseGate = ConfigureSerializedResponses(gateway);
         creationRace.Enable();
+        using var testDeadline = new CancellationTokenSource(
+            TimeSpan.FromSeconds(30));
+        var cancellationToken = testDeadline.Token;
 
         var firstRequest = client.PostAsync(
             $"/api/orders/{orderId}/payments",
-            content: null);
+            content: null,
+            cancellationToken);
         var secondRequest = client.PostAsync(
             $"/api/orders/{orderId}/payments",
-            content: null);
+            content: null,
+            cancellationToken);
 
         try
         {
-            await responseGate.SecondGatewayRequest.Task.WaitAsync(
-                TimeSpan.FromSeconds(5));
+            await WaitForSecondGatewayRequestAsync(
+                responseGate,
+                firstRequest,
+                secondRequest,
+                cancellationToken);
             var firstCompleted = await Task.WhenAny(firstRequest, secondRequest)
-                .WaitAsync(TimeSpan.FromSeconds(5));
+                .WaitAsync(cancellationToken);
             var firstResponse = await firstCompleted;
             Assert.Contains(
                 firstResponse.StatusCode,
@@ -53,8 +62,10 @@ public sealed class PaymentProcessingConcurrencyTests
             responseGate.ReleaseSecond.TrySetResult(null);
         }
 
-        using var firstFinalResponse = await firstRequest;
-        using var secondFinalResponse = await secondRequest;
+        using var firstFinalResponse = await firstRequest.WaitAsync(
+            cancellationToken);
+        using var secondFinalResponse = await secondRequest.WaitAsync(
+            cancellationToken);
         Assert.Equal(
             new[] { HttpStatusCode.OK, HttpStatusCode.Created },
             new[]
@@ -97,20 +108,28 @@ public sealed class PaymentProcessingConcurrencyTests
         var gateway = factory.Services
             .GetRequiredService<DeterministicTestPaymentGateway>();
         var responseGate = ConfigureSerializedResponses(gateway);
+        using var testDeadline = new CancellationTokenSource(
+            TimeSpan.FromSeconds(30));
+        var cancellationToken = testDeadline.Token;
 
         var firstRequest = client.PostAsync(
             $"/api/orders/{orderId}/payments",
-            content: null);
+            content: null,
+            cancellationToken);
         var secondRequest = client.PostAsync(
             $"/api/orders/{orderId}/payments",
-            content: null);
+            content: null,
+            cancellationToken);
 
         try
         {
-            await responseGate.SecondGatewayRequest.Task.WaitAsync(
-                TimeSpan.FromSeconds(5));
+            await WaitForSecondGatewayRequestAsync(
+                responseGate,
+                firstRequest,
+                secondRequest,
+                cancellationToken);
             var firstCompleted = await Task.WhenAny(firstRequest, secondRequest)
-                .WaitAsync(TimeSpan.FromSeconds(5));
+                .WaitAsync(cancellationToken);
             var firstResponse = await firstCompleted;
             Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
         }
@@ -119,8 +138,10 @@ public sealed class PaymentProcessingConcurrencyTests
             responseGate.ReleaseSecond.TrySetResult(null);
         }
 
-        using var firstFinalResponse = await firstRequest;
-        using var secondFinalResponse = await secondRequest;
+        using var firstFinalResponse = await firstRequest.WaitAsync(
+            cancellationToken);
+        using var secondFinalResponse = await secondRequest.WaitAsync(
+            cancellationToken);
         Assert.Equal(HttpStatusCode.OK, firstFinalResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, secondFinalResponse.StatusCode);
         Assert.All(
@@ -132,6 +153,39 @@ public sealed class PaymentProcessingConcurrencyTests
         Assert.Equal(2, gateway.GatewayRequestCount);
         Assert.Equal(1, gateway.ExternalEffectExecutionCount);
         await AssertSingleSuccessfulCommitAsync(factory, orderId, payment.Id);
+    }
+
+    private static async Task WaitForSecondGatewayRequestAsync(
+        ResponseGate responseGate,
+        Task<HttpResponseMessage> firstRequest,
+        Task<HttpResponseMessage> secondRequest,
+        CancellationToken cancellationToken)
+    {
+        var gatewayRequest = responseGate.SecondGatewayRequest.Task;
+        var completed = await Task.WhenAny(
+                gatewayRequest,
+                firstRequest,
+                secondRequest)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (completed == gatewayRequest || gatewayRequest.IsCompleted)
+        {
+            await gatewayRequest.ConfigureAwait(false);
+            return;
+        }
+
+        var requestName = completed == firstRequest ? "first" : "second";
+        var request = completed == firstRequest ? firstRequest : secondRequest;
+        using var response = await request.ConfigureAwait(false);
+        var responseBody = await response.Content
+            .ReadAsStringAsync()
+            .ConfigureAwait(false);
+
+        throw new XunitException(
+            $"The {requestName} payment request completed before the second "
+            + $"gateway request arrived. HTTP {(int)response.StatusCode} "
+            + $"({response.StatusCode}). Body: {responseBody}");
     }
 
     private static ResponseGate ConfigureSerializedResponses(

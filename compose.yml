@@ -34,7 +34,13 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test:
+        - CMD
+        - gosu
+        - rabbitmq
+        - rabbitmq-diagnostics
+        - -q
+        - ping
       interval: 5s
       timeout: 5s
       retries: 20
