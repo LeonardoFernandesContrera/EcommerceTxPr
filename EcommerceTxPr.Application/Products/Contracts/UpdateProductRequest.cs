@@ -1,0 +1,16 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace EcommerceTxPr.Application.Products.Contracts;
+
+public sealed record UpdateProductRequest(
+    [Required(ErrorMessage = "Name is required.")]
+    [StringLength(100, ErrorMessage = "Name must not exceed 100 characters.")]
+    string Name,
+    [Range(
+        typeof(decimal),
+        "0.01",
+        "9999999999999999.99",
+        ErrorMessage = "Price must be greater than zero.",
+        ParseLimitsInInvariantCulture = true,
+        ConvertValueInInvariantCulture = true)]
+    decimal Price);

@@ -1,12 +1,11 @@
-﻿using EcommerceApi.Entities;
-using EcommerceTxPr.Domain.Shared;
+using EcommerceTxPr.Application.Customers.Repositories;
+using EcommerceTxPr.Domain.Entities;
 using EcommerceTxPr.Infrastructure.Context;
-using EcommerceTxPr.Infrastructure.ResultPatterns;
 using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceTxPr.Infrastructure.Repositories
 {
-    public class CustomerRepository : ICustomerRepository
+    public sealed class CustomerRepository : ICustomerRepository
     {
         private readonly EcommerceTxPrDbContext _context;
 
@@ -15,55 +14,34 @@ namespace EcommerceTxPr.Infrastructure.Repositories
             _context = context;
         }
 
-        public async Task<Result<string, Error>> CreateAsync(Customer obj)
+        public async Task<IReadOnlyCollection<Customer>> GetAllAsync(
+            CancellationToken cancellationToken)
         {
-            await _context.Customers.AddAsync(obj).ConfigureAwait(false);
-
-            return "client created";
+            return await _context.Customers
+                .AsNoTracking()
+                .Where(customer => customer.IsActive)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        public async Task<Result<string, Error>> DeleteByIdAsync(int Id)
+        public async Task<Customer?> GetByIdAsync(
+            Guid id,
+            CancellationToken cancellationToken)
         {
-            var customer = await GetByIdAsync(Id).ConfigureAwait(false);
-
-            if (customer.IsSuccess == false)
-                return GenericErrors.NotFoundObject;
-
-            customer.Value!.TurnIsActiveToFalse(); 
-
-            await UpdateAsync(customer.Value!);
-
-            return "Client was updated";
+            return await _context.Customers
+                .FirstOrDefaultAsync(
+                    customer => customer.Id == id && customer.IsActive,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        public async Task<Result<IEnumerable<Customer>, Error>> GetAllAsync()
+        public async Task AddAsync(
+            Customer customer,
+            CancellationToken cancellationToken)
         {
-            var customers = await _context.Set<Customer>().ToListAsync();
-
-            if (customers == null)
-            {
-                return GenericErrors.NotFoundObject;
-            }
-            else
-                return customers;
-        }
-
-        public async Task<Result<Customer, Error>> GetByIdAsync(int Id)
-        {
-            var customer = await _context.Customers.FindAsync(Id);
-
-            if (customer == null)
-                return GenericErrors.NotFoundObject;
-
-            return customer;
-        }
-
-        public async Task<Result<string, Error>> UpdateAsync(Customer obj)
-        {
-            _context.Set<Customer>().Entry(obj).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-
-            return "Modified with success";
+            await _context.Customers
+                .AddAsync(customer, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 }

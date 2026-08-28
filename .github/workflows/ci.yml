@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Restore packages
+        run: dotnet restore
+
+      - name: Build with warnings as errors
+        run: >-
+          dotnet build
+          --configuration Release
+          --no-restore
+          -warnaserror
+
+      - name: Run tests
+        run: >-
+          dotnet test
+          --configuration Release
+          --no-build
+
+      - name: Check migration drift
+        run: >-
+          dotnet ef migrations has-pending-model-changes
+          --project EcommerceTxPr.Infrastructure
+          --startup-project EcommerceApi.V2
+          --context EcommerceTxPrDbContext
+          --configuration Release
+          --no-build
+          --
+          --ConnectionStrings:DefaultConnection="Server=localhost;Database=EcommerceTxPrDesignTime;Integrated Security=True;TrustServerCertificate=True;Connect Timeout=1"
+
+      - name: Audit vulnerable packages
+        shell: bash
+        run: |
+          dotnet list package \
+            --vulnerable \
+            --include-transitive \
+            --format json > vulnerable-packages.json
+          cat vulnerable-packages.json
+          jq --exit-status \
+            '[.. | objects | select(has("vulnerabilities"))] | length == 0' \
+            vulnerable-packages.json
+
+  production-smoke:
+    name: Production smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Generate CI-only credentials
+        shell: bash
+        run: |
+          {
+            echo "MSSQL_SA_PASSWORD=Ci_Phase13_$(openssl rand -hex 16)!Aa1"
+            echo "RABBITMQ_DEFAULT_USER=ci_ecommerce"
+            echo "RABBITMQ_DEFAULT_PASS=Ci_Rabbit_$(openssl rand -hex 16)!Aa1"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build API image
+        run: >-
+          docker build
+          --target api-runtime
+          --tag ecommercetxpr-api:ci
+          .
+
+      - name: Build migrations image
+        run: >-
+          docker build
+          --target migrations-runtime
+          --tag ecommercetxpr-migrations:ci
+          .
+
+      - name: Run Compose smoke test
+        shell: bash
+        run: bash scripts/compose-smoke.sh
+
+      - name: Always clean Compose resources
+        if: always()
+        run: docker compose down --volumes --remove-orphans

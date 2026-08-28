@@ -1,48 +1,114 @@
-﻿using EcommerceApi.Entities;
-using EcommerceTxPr.Aplication.Services;
+using EcommerceApi.V2.ErrorHandling;
+using EcommerceTxPr.Application.Customers.Contracts;
+using EcommerceTxPr.Application.Customers.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EcommerceApi.V2.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
-    public class CustomerController(ICustomerService customerService)
+    [Route("api/customers")]
+    public class CustomerController(ICustomerService customerService) : ControllerBase
     {
         private readonly ICustomerService _customerService = customerService;
 
         [HttpGet]
-        [Route("GetById")]
-        public async Task<object> GetById(int Id)
+        [ProducesResponseType<IReadOnlyCollection<CustomerResponse>>(StatusCodes.Status200OK)]
+        public async Task<ActionResult<IReadOnlyCollection<CustomerResponse>>> GetAll(
+            CancellationToken cancellationToken)
         {
-            return await _customerService.GetByIdAsync(Id).ConfigureAwait(false);
+            var result = await _customerService
+                .GetAllAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                return this.ToProblemDetails(result.Error!);
+            }
+
+            return Ok(result.Value!);
         }
 
-        [HttpGet]
-        [Route("GetAll")]
-        public async Task<object> GetAll()
+        [HttpGet("{id:guid}")]
+        [ProducesResponseType<CustomerResponse>(StatusCodes.Status200OK)]
+        [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<CustomerResponse>> GetById(
+            Guid id,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.GetAllAsync().ConfigureAwait(false);
+            var result = await _customerService
+                .GetByIdAsync(id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                return this.ToProblemDetails(result.Error!);
+            }
+
+            return Ok(result.Value!);
         }
 
         [HttpPost]
-        [Route("Create")]
-        public async Task<object> Create(Customer customer)
+        [ProducesResponseType<CustomerResponse>(StatusCodes.Status201Created)]
+        [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<CustomerResponse>> Create(
+            [FromBody] CreateCustomerRequest request,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.CreateAsync(customer).ConfigureAwait(false);
+            var result = await _customerService
+                .CreateAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                return this.ToProblemDetails(result.Error!);
+            }
+
+            var customer = result.Value!;
+
+            return CreatedAtAction(
+                nameof(GetById),
+                new { id = customer.Id },
+                customer);
         }
 
-        [HttpPut]
-        [Route("Update")]
-        public async Task<object> Update(Customer customer)
+        [HttpPut("{id:guid}")]
+        [ProducesResponseType<CustomerResponse>(StatusCodes.Status200OK)]
+        [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<CustomerResponse>> Update(
+            Guid id,
+            [FromBody] UpdateCustomerRequest request,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.UpdateAsync(customer).ConfigureAwait(false);
+            var result = await _customerService
+                .UpdateAsync(id, request, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                return this.ToProblemDetails(result.Error!);
+            }
+
+            return Ok(result.Value!);
         }
 
-        [HttpDelete]
-        [Route("Delete")]
-        public async Task<object> Delete(int Id)
+        [HttpDelete("{id:guid}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Delete(
+            Guid id,
+            CancellationToken cancellationToken)
         {
-            return await _customerService.DeleteByIdAsync(Id).ConfigureAwait(false);
+            var result = await _customerService
+                .DeleteAsync(id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                return this.ToProblemDetails(result.Error!);
+            }
+
+            return NoContent();
         }
     }
 }

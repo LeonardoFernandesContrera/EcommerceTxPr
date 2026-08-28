@@ -1,13 +1,20 @@
 @EcommerceApi.V2_HostAddress = http://localhost:5184
+@CustomerId = 00000000-0000-0000-0000-000000000000
 
-GET {{EcommerceApi.V2_HostAddress}}/api/Customer/GetById
+GET {{EcommerceApi.V2_HostAddress}}/api/customers
 Accept: application/json
 
 
 ###
 
-GET {{EcommerceApi.V2_HostAddress}}/api/Customer/HealthCheck
+GET {{EcommerceApi.V2_HostAddress}}/api/customers/{{CustomerId}}
 Accept: application/json
+
+
+###
+
+GET {{EcommerceApi.V2_HostAddress}}/health
+Accept: text/plain
 
 
 ###
