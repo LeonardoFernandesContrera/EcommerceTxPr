@@ -6,7 +6,7 @@ A reliability-focused .NET 8 e-commerce backend demonstrating transactional cons
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
-**323 automated tests · Release build: 0 errors / 0 warnings · CI quality and production smoke validation**
+**323 automated tests | Release build: 0 errors / 0 warnings | CI quality and production smoke validation**
 
 EcommerceTxPr is an architecture and backend-engineering portfolio project, not a commercial storefront. Its focus is the difficult part of stateful APIs: preserving business intent when requests repeat, writes race, a payment result is uncertain, or a message broker is temporarily unavailable.
 
